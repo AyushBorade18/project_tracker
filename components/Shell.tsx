@@ -1,6 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
+  Download as DownloadIcon,
   Columns3,
   History,
   ListChecks,
@@ -36,7 +37,29 @@ const NAV: { id: ViewId; label: string; icon: React.ComponentType<{ className?: 
   { id: "activity", label: "Activity", icon: History },
 ];
 
+interface InstallEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
+/** Chrome/Edge/Android fire this when the app is installable; iOS has no event (use Share, Add to Home Screen). */
+function useInstall() {
+  const [evt, setEvt] = useState<InstallEvent | null>(null);
+  useEffect(() => {
+    const onPrompt = (e: Event) => { e.preventDefault(); setEvt(e as InstallEvent); };
+    const onInstalled = () => setEvt(null);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  return evt ? async () => { await evt.prompt(); await evt.userChoice; setEvt(null); } : null;
+}
+
 export function Shell() {
+  const install = useInstall();
   const { view, setView, isAdmin, profile, profiles, deliverables, theme, toggleTheme, signOut, toasts, confirmState, closeConfirm, loading, memberIndex, askConfirm } = useApp();
 
   const pendingCount = useMemo(() => deliverables.filter((d) => d.status === "pending").length, [deliverables]);
@@ -60,6 +83,9 @@ export function Shell() {
             <span className="font-display text-xl font-semibold tracking-wide">ProjectTrack</span>
           </div>
           <div className="flex items-center gap-1 lg:hidden">
+            {install && (
+              <button type="button" onClick={install} className="rounded-md px-2 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10" aria-label="Install app">Install</button>
+            )}
             <button type="button" onClick={toggleTheme} className="rounded-md p-2 text-white/70 hover:bg-white/10" aria-label="Toggle theme">
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
@@ -103,6 +129,11 @@ export function Shell() {
               <p className="text-xs text-white/55">{isAdmin ? "Group leader (admin)" : "Team member"}</p>
             </div>
           </div>
+          {install && (
+            <button type="button" onClick={install} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md bg-white py-1.5 text-xs font-semibold text-rail hover:opacity-90">
+              <DownloadIcon className="h-3.5 w-3.5" /> Install app
+            </button>
+          )}
           <div className="mt-3 flex gap-2">
             <button type="button" onClick={toggleTheme} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 py-1.5 text-xs hover:bg-white/20">
               {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}

@@ -19,3 +19,11 @@ Everything is stored in Postgres, so progress is identical on every device and l
 Storage bucket. Permissions are enforced by the database (row level security and triggers), not the UI:
 members can only edit their own assigned work, only the leader can confirm, approved work is locked, and every
 change is written to the activity log.
+
+## Installable app (PWA)
+ProjectTrack can be installed on phones and laptops. It is HTTPS-only, so it works on your Vercel URL
+(not on plain http except localhost). The service worker only runs in production builds.
+- Android / Chrome / Edge: use the "Install app" button in the sidebar, or the browser's install icon.
+- iPhone / iPad: open the site in Safari, tap Share, then Add to Home Screen.
+Only the app shell is cached. Team data always comes live from Supabase, so offline you see a friendly
+"You are offline" page instead of stale data. After a deploy, the new version loads on the next visit.
