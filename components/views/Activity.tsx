@@ -3,7 +3,7 @@ import { useApp } from "../../lib/store";
 import { fmtDateTime } from "../../lib/calc";
 import { Avatar, EmptyState, PageTitle, Panel, SubjectTag, cx, inputCls } from "../ui";
 
-const DOT: Record<string, string> = { approved: "bg-ok", submitted: "bg-warn", rejected: "bg-bad", revoked: "bg-bad", assigned: "bg-info", created: "bg-info", progress: "bg-faint", deleted: "bg-bad" };
+const DOT: Record<string, string> = { approved: "bg-ok", submitted: "bg-warn", rejected: "bg-bad", revoked: "bg-bad", assigned: "bg-info", created: "bg-info", progress: "bg-faint", deleted: "bg-bad", task: "bg-info" };
 
 export function Activity() {
   const { activity, subjects, members, nameOf, memberIndex, subjectIndex, openTask, deliverables } = useApp();

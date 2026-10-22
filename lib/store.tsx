@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { BUCKET, getSupabase } from "./supabase";
-import { ActivityItem, Attachment, Deliverable, Group, Membership, Profile, Semester, Status, Subject, ViewId } from "./types";
+import { ActivityItem, Attachment, Deliverable, Group, Membership, Profile, Semester, Status, Subject, Task, ViewId } from "./types";
 import { LegacyBackup, dataUrlToFile, mapProof, mapStatus, matchMember, normalizeType } from "./legacy";
 
 type Tone = "ok" | "bad" | "info";
@@ -63,6 +63,7 @@ interface AppContextValue {
   deliverables: Deliverable[];
   attachments: Attachment[];
   activity: ActivityItem[];
+  tasks: Task[];
   nameOf: (id: string | null | undefined) => string;
   memberIndex: (id: string | null | undefined) => number;
   subjectIndex: (id: string | null | undefined) => number;
@@ -102,6 +103,9 @@ interface AppContextValue {
   deleteAttachment: (att: Attachment) => Promise<boolean>;
   openAttachment: (att: Attachment) => Promise<void>;
   importLegacy: (backup: LegacyBackup) => Promise<ImportResult | null>;
+  addTask: (t: { subject_id: string; title: string; assignee_id?: string | null; due_date?: string | null; deliverable_id?: string | null; details?: string }) => Promise<boolean>;
+  patchTask: (id: string, patch: Partial<Pick<Task, "title" | "details" | "assignee_id" | "due_date" | "status" | "deliverable_id">>, okMsg?: string) => Promise<boolean>;
+  deleteTask: (id: string) => Promise<boolean>;
 }
 
 const Ctx = createContext<AppContextValue | null>(null);
@@ -150,6 +154,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
 
   const [view, setViewState] = useState<ViewId>("scoreboard");
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -229,6 +234,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setDeliverables([]);
         setAttachments([]);
         setActivity([]);
+        setTasks([]);
         setShowOnboarding(false);
       }
     });
@@ -328,6 +334,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDeliverables([]);
     setAttachments([]);
     setActivity([]);
+    setTasks([]);
     setOpenTaskId(null);
     setGroupId(id);
     setShowOnboarding(false);
@@ -384,6 +391,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const { data, error } = await sb.from("attachments").select("*").eq("group_id", g).eq("semester_id", s).order("created_at");
         if (!error && data) setAttachments(data as Attachment[]);
       },
+      tasks: async () => {
+        const g = gRef.current, s = sRef.current;
+        if (!g || !s) return;
+        const { data, error } = await sb.from("tasks").select("*").eq("group_id", g).eq("semester_id", s).order("created_at");
+        if (!error && data) setTasks(data as Task[]);
+      },
       activity: async () => {
         const g = gRef.current, s = sRef.current;
         if (!g || !s) return;
@@ -397,7 +410,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshAll = useCallback(async () => {
     await loadMe();
     await Promise.all([fetchers.members(), fetchers.semesters()]);
-    await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity()]);
+    await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity(), fetchers.tasks()]);
   }, [fetchers, loadMe]);
 
   // Load the group when it becomes active
@@ -419,7 +432,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!active || !groupId || !semesterId) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity()]).finally(() => !cancelled && setLoading(false));
+    Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity(), fetchers.tasks()]).finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, [active, groupId, semesterId, fetchers]);
 
@@ -438,6 +451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     on("deliverables", () => { fetchers.deliverables(); fetchers.activity(); });
     on("subjects", () => fetchers.subjects());
     on("attachments", () => fetchers.attachments());
+    on("tasks", () => { fetchers.tasks(); fetchers.activity(); });
     on("activity", () => fetchers.activity());
     on("semesters", () => fetchers.semesters());
     on("memberships", () => { fetchers.members(); loadMe(); });
@@ -769,6 +783,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [sb, notify]
   );
 
+  const addTask: AppContextValue["addTask"] = useCallback(
+    async (t) => {
+      const ok = await run(() =>
+        sb.from("tasks").insert({
+          subject_id: t.subject_id,
+          title: t.title.trim(),
+          assignee_id: t.assignee_id || null,
+          due_date: t.due_date || null,
+          deliverable_id: t.deliverable_id || null,
+          details: t.details?.trim() || "",
+        }),
+        "Task assigned"
+      );
+      if (ok) await Promise.all([fetchers.tasks(), fetchers.activity()]);
+      return ok;
+    },
+    [run, sb, fetchers]
+  );
+
+  const patchTask: AppContextValue["patchTask"] = useCallback(
+    async (id, patch, okMsg) => {
+      const ok = await run(() => sb.from("tasks").update(patch).eq("id", id), okMsg);
+      if (ok) await Promise.all([fetchers.tasks(), fetchers.activity()]);
+      return ok;
+    },
+    [run, sb, fetchers]
+  );
+
+  const deleteTask: AppContextValue["deleteTask"] = useCallback(
+    async (id) => {
+      const ok = await run(() => sb.from("tasks").delete().eq("id", id), "Task removed");
+      if (ok) await fetchers.tasks();
+      return ok;
+    },
+    [run, sb, fetchers]
+  );
+
   /** Brings the original app's JSON backup into the semester being viewed (leader only). */
   const importLegacy: AppContextValue["importLegacy"] = useCallback(
     async (backup) => {
@@ -855,7 +906,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     me, profile, profileLoaded, isLeader, isAdmin,
     groups, group, switchGroup, showOnboarding, setShowOnboarding,
     semesters, semester, currentSemester, setSemesterId, readOnly,
-    loading, profiles, members, subjects, deliverables, attachments, activity,
+    loading, profiles, members, subjects, deliverables, attachments, activity, tasks,
     nameOf, memberIndex, subjectIndex, refreshAll,
     view, setView, openTaskId, openTask: setOpenTaskId, theme, toggleTheme,
     toasts, notify, confirmState, askConfirm, closeConfirm,
@@ -863,6 +914,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateProfile, changeOwnPassword, saveSubject, addSubject, deleteSubject,
     addDeliverable, patchDeliverable, deleteDeliverable, rebalance, bulkAssign,
     uploadAttachment, deleteAttachment, openAttachment, importLegacy,
+    addTask, patchTask, deleteTask,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

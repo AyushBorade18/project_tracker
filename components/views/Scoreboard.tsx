@@ -17,6 +17,7 @@ import {
 import { SUBJECT_COLORS } from "../../lib/theme";
 import { Avatar, Button, Chip, EmptyState, PageTitle, Panel, PanelHeader, StackBar, StatusBadge, SubjectTag, cx } from "../ui";
 import { BurnUpChart } from "../charts";
+import { TaskList } from "../TaskList";
 
 const PACE_CHIP: Record<Pace, { text: string; tone: "ok" | "warn" | "bad" | "muted" } | null> = {
   none: null,
@@ -27,7 +28,8 @@ const PACE_CHIP: Record<Pace, { text: string; tone: "ok" | "warn" | "bad" | "mut
 };
 
 function Lane({ stat, index, open, onToggle }: { stat: SubjectStat; index: number; open: boolean; onToggle: () => void }) {
-  const { nameOf, memberIndex, openTask, isAdmin, setView } = useApp();
+  const { nameOf, memberIndex, openTask, isAdmin, setView, tasks } = useApp();
+  const openTasks = tasks.filter((t) => t.subject_id === stat.subject.id && t.status === "open").length;
   const { subject } = stat;
   const dl = deadlineLabel(stat.days);
   const pace = PACE_CHIP[stat.pace];
@@ -66,6 +68,7 @@ function Lane({ stat, index, open, onToggle }: { stat: SubjectStat; index: numbe
             <Chip tone={dl.tone}>{subject.deadline ? `${fmtDate(subject.deadline)}: ${dl.text}` : dl.text}</Chip>
             {pace && <Chip tone={pace.tone}>{pace.text}</Chip>}
             {stat.pendingPct > 0 && <Chip tone="warn">+{Math.round(stat.pendingPct)}% awaiting</Chip>}
+            {openTasks > 0 && <Chip tone="info">{openTasks} open task{openTasks > 1 ? "s" : ""}</Chip>}
             {stat.configured && <span className="text-[11px] text-muted">{stat.doneCount} of {stat.count} confirmed</span>}
             {subject.lead_id && <span className="text-[11px] text-muted">Lead: {nameOf(subject.lead_id)}</span>}
           </div>
@@ -94,6 +97,8 @@ function Lane({ stat, index, open, onToggle }: { stat: SubjectStat; index: numbe
               ))}
             </ul>
           )}
+          <h4 className="mb-2 mt-4 font-display text-lg font-semibold tracking-wide">Tasks</h4>
+          <TaskList subjectId={subject.id} />
         </div>
       )}
     </div>

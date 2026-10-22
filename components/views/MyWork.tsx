@@ -3,9 +3,14 @@ import { useApp } from "../../lib/store";
 import { daysUntil, deadlineLabel, effectiveDue, fmtDate, isOverdue } from "../../lib/calc";
 import { Deliverable } from "../../lib/types";
 import { Chip, EmptyState, PageTitle, Panel, StatusBadge, SubjectTag } from "../ui";
+import { TaskRow } from "../TaskList";
 
 export function MyWork() {
-  const { deliverables, subjects, profile, openTask, subjectIndex } = useApp();
+  const { deliverables, subjects, profile, openTask, subjectIndex, tasks } = useApp();
+  const myTasks = useMemo(
+    () => tasks.filter((t) => t.assignee_id === profile?.id).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || (a.due_date || "9999").localeCompare(b.due_date || "9999")),
+    [tasks, profile]
+  );
   const mine = useMemo(() => deliverables.filter((d) => d.assignee_id === profile?.id), [deliverables, profile]);
   const subjectOf = (d: Deliverable) => subjects.find((s) => s.id === d.subject_id);
 
@@ -31,9 +36,15 @@ export function MyWork() {
   return (
     <div>
       <PageTitle title="My work" sub={mine.length ? `${done} of ${mine.length} of your deliverables are confirmed.` : undefined} />
-      {mine.length === 0 ? (
-        <EmptyState title="Nothing is assigned to you yet" body="When the group leader assigns you a deliverable it shows up here, sorted by what needs you first." />
-      ) : (
+      {myTasks.length > 0 && (
+        <section className="mb-6">
+          <h2 className="mb-2 font-display text-xl font-semibold tracking-wide">Tasks from your leader <span className="text-muted">({myTasks.filter((t) => t.status === "open").length} open)</span></h2>
+          <Panel><ul className="divide-y divide-line">{myTasks.map((t) => <TaskRow key={t.id} task={t} showSubject />)}</ul></Panel>
+        </section>
+      )}
+      {mine.length === 0 && myTasks.length === 0 ? (
+        <EmptyState title="Nothing is assigned to you yet" body="When the group leader assigns you a deliverable or a task it shows up here, sorted by what needs you first." />
+      ) : mine.length === 0 ? null : (
         <div className="space-y-6">
           {sections.map((sec) => (
             <section key={sec.title}>

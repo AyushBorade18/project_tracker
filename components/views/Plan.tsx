@@ -3,6 +3,7 @@ import { Check, ExternalLink, FileUp, Plus, Trash2 } from "lucide-react";
 import { useApp } from "../../lib/store";
 import { STANDARD_DELIVERABLES, Subject } from "../../lib/types";
 import { LegacyBackup, legacyCounts, parseLegacy } from "../../lib/legacy";
+import { TaskList } from "../TaskList";
 import { Button, Chip, CommitInput, EmptyState, Field, PageTitle, Panel, SubjectTag, cx, inputCls } from "../ui";
 
 function SubjectPlan({ subject }: { subject: Subject }) {
@@ -81,6 +82,12 @@ function SubjectPlan({ subject }: { subject: Subject }) {
         </div>
       </div>
 
+      <div className="border-b border-line p-4">
+        <h4 className="font-display text-lg font-semibold tracking-wide">Tasks for {subject.code}</h4>
+        <p className="mb-3 mt-0.5 text-xs text-muted">What you need from the team in this project: set before they start, or added later when something needs changing. Each person sees theirs under My work.</p>
+        <TaskList subjectId={subject.id} />
+      </div>
+
       {items.length === 0 ? (
         <p className="p-5 text-center text-sm text-muted">Switch on at least one deliverable above to start tracking {subject.code}.</p>
       ) : (
@@ -91,10 +98,21 @@ function SubjectPlan({ subject }: { subject: Subject }) {
               {sum !== 100 && <span className="text-xs text-muted">They should add up to 100%. Percentages are scaled until you fix this.</span>}
             </div>
             <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => rebalance(subject.id)}>Split evenly to 100%</Button>
+              <Button
+                size="sm"
+                onClick={async () => (await askConfirm({ title: `Split ${subject.code} weights evenly?`, body: "Every deliverable in this subject gets an equal share of 100%. Your current weights are replaced.", confirmLabel: "Split evenly" })) && rebalance(subject.id)}
+              >
+                Split evenly to 100%
+              </Button>
               <select
                 value=""
-                onChange={(e) => e.target.value && bulkAssign(subject.id, e.target.value === "NONE" ? null : e.target.value)}
+                onChange={async (e) => {
+                  const v = e.target.value;
+                  if (!v) return;
+                  const who = v === "NONE" ? "nobody" : members.find((m) => m.id === v)?.full_name || "this person";
+                  if (await askConfirm({ title: `Assign every ${subject.code} deliverable to ${who}?`, body: "This replaces the current assignee on all of them.", confirmLabel: "Assign all" }))
+                    bulkAssign(subject.id, v === "NONE" ? null : v);
+                }}
                 className={cx(inputCls, "w-auto py-1 text-xs")}
                 aria-label={`Assign every ${subject.code} deliverable`}
               >

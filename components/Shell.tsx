@@ -29,6 +29,7 @@ import { Plan } from "./views/Plan";
 import { Team } from "./views/Team";
 import { Activity } from "./views/Activity";
 import { TaskDrawer } from "./TaskDrawer";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 
 type Icon = React.ComponentType<{ className?: string }>;
 const NAV: { id: ViewId; label: string; icon: Icon; admin?: boolean }[] = [
@@ -61,54 +62,6 @@ function useInstall() {
     };
   }, []);
   return evt ? async () => { await evt.prompt(); await evt.userChoice; setEvt(null); } : null;
-}
-
-function GroupSemesterPickers({ compact = false }: { compact?: boolean }) {
-  const { groups, group, switchGroup, semesters, semester, setSemesterId, setShowOnboarding, isLeader, renameSemester } = useApp();
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState("");
-  const sel = cx(inputCls, compact ? "py-1.5 text-xs" : "py-2 text-sm");
-  return (
-    <div className={cx("space-y-2", compact && "space-y-1.5")}>
-      {groups.length > 1 ? (
-        <select className={sel} value={group?.id || ""} onChange={(e) => switchGroup(e.target.value)} aria-label="Group">
-          {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-        </select>
-      ) : (
-        <p className="truncate text-sm font-medium" title={group?.name}>{group?.name}</p>
-      )}
-      {semesters.length > 0 && (
-        <select className={sel} value={semester?.id || ""} onChange={(e) => setSemesterId(e.target.value)} aria-label="Semester">
-          {[...semesters].reverse().map((s) => (
-            <option key={s.id} value={s.id}>{s.name}{s.status === "current" ? " (current)" : " (archived)"}</option>
-          ))}
-        </select>
-      )}
-      {isLeader && semester && !renaming && (
-        <button type="button" onClick={() => { setDraft(semester.name); setRenaming(true); }} className={cx("inline-flex items-center gap-1 text-[11px]", compact ? "text-info" : "text-white/60 hover:text-white")}>
-          <Pencil className="h-3 w-3" /> Rename semester
-        </button>
-      )}
-      {isLeader && semester && renaming && (
-        <form
-          className="flex gap-1.5"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (draft.trim() && (await renameSemester(draft))) setRenaming(false);
-          }}
-        >
-          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={80} aria-label="Semester name" className={cx(sel, "min-w-0 flex-1")} />
-          <button type="submit" className="rounded-md bg-ok px-2.5 text-xs font-semibold text-white">Save</button>
-          <button type="button" onClick={() => setRenaming(false)} className="rounded-md px-2 text-xs opacity-70 hover:opacity-100">Cancel</button>
-        </form>
-      )}
-      {!compact && (
-        <button type="button" onClick={() => setShowOnboarding(true)} className="inline-flex items-center gap-1 text-[11px] text-white/60 hover:text-white">
-          <Plus className="h-3 w-3" /> Join or create another group
-        </button>
-      )}
-    </div>
-  );
 }
 
 export function Shell() {
@@ -150,9 +103,7 @@ export function Shell() {
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white font-display text-base font-bold tracking-wide text-rail">PT</div>
             <span className="font-display text-xl font-semibold tracking-wide">ProjectTrack</span>
           </div>
-          <div className="mt-5 rounded-md bg-white/10 p-3 text-white [&_select]:border-white/20 [&_select]:bg-rail [&_select]:text-white">
-            <GroupSemesterPickers />
-          </div>
+          <div className="mt-5"><WorkspaceMenu variant="rail" /></div>
         </div>
         <nav className="mt-4 flex flex-1 flex-col gap-1 px-3" aria-label="Main">
           {items.map((n) => {
@@ -203,10 +154,7 @@ export function Shell() {
       <header className="sticky top-0 z-30 border-b border-white/10 bg-rail text-white lg:hidden" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <div className="flex items-center gap-3 px-4 py-2.5">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-white font-display text-sm font-bold text-rail">PT</div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold leading-tight">{group?.name}</p>
-            <p className="truncate text-[11px] leading-tight text-white/60">{semester?.name}{readOnly ? " (archived)" : ""}</p>
-          </div>
+          <div className="min-w-0 flex-1"><WorkspaceMenu variant="bar" /></div>
           {install && (
             <button type="button" onClick={install} className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-rail">Install</button>
           )}
@@ -276,10 +224,6 @@ export function Shell() {
             <div className="mb-3 flex items-center justify-between">
               <span className="font-display text-2xl font-semibold tracking-wide">More</span>
               <button type="button" onClick={() => setMoreOpen(false)} className="rounded-md p-2 text-muted hover:bg-line/40" aria-label="Close"><X className="h-5 w-5" /></button>
-            </div>
-            <div className="mb-4 rounded-lg bg-surface2 p-3 text-ink">
-              <GroupSemesterPickers compact />
-              <button type="button" onClick={() => { setMoreOpen(false); setShowOnboarding(true); }} className="mt-2 inline-flex items-center gap-1 text-xs text-info"><Plus className="h-3 w-3" /> Join or create another group</button>
             </div>
             <ul className="divide-y divide-line rounded-lg border border-line">
               {moreItems.map((n) => {

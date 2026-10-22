@@ -84,6 +84,22 @@ export interface Attachment {
   created_at: string;
 }
 
+export interface Task {
+  id: string;
+  group_id: string;
+  semester_id: string;
+  subject_id: string;
+  deliverable_id: string | null;
+  title: string;
+  details: string;
+  assignee_id: string | null;
+  status: "open" | "done";
+  due_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  done_at: string | null;
+}
+
 export interface ActivityItem {
   id: number;
   group_id: string;

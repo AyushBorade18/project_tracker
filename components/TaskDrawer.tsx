@@ -4,6 +4,7 @@ import { useApp } from "../lib/store";
 import { daysUntil, deadlineLabel, effectiveDue, fmtDate, fmtDateTime, formatBytes } from "../lib/calc";
 import { Status, STATUS_LABEL, isHttpUrl, submissionKind } from "../lib/types";
 import { Avatar, Button, Chip, CommitInput, Drawer, Field, StatusBadge, SubjectTag, cx, inputCls } from "./ui";
+import { TaskList } from "./TaskList";
 
 const STEPS: Status[] = ["todo", "in_progress", "pending", "approved"];
 
@@ -83,6 +84,12 @@ export function TaskDrawer() {
     if (kind === "link" && !live.trim() && !repo.trim()) return notify("Add the deployed link or the GitHub repository before submitting.", "bad");
     if (kind === "file" && files.length === 0) return notify("Upload the file before submitting.", "bad");
     if (kind === "any" && files.length === 0 && !proof.trim()) return notify("Add a link or upload a file before submitting.", "bad");
+    const sure = await askConfirm({
+      title: "Submit for review?",
+      body: "The group leader will check it. You can't edit it while it waits, but you can withdraw it.",
+      confirmLabel: "Submit",
+    });
+    if (!sure) return;
     const ok = await patchDeliverable(d.id, { ...savePatch(), status: "pending" }, "Submitted for review. The group leader will check it.");
     if (ok) setDirty(false);
   };
@@ -95,7 +102,14 @@ export function TaskDrawer() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const approve = () => patchDeliverable(d.id, { status: "approved" }, "Confirmed. The percentage is unlocked.");
+  const approve = async () => {
+    const sure = await askConfirm({
+      title: `Approve "${d.title}"?`,
+      body: `${d.weight}% is added to ${subject?.code || "the subject"} and the work is locked for ${nameOf(d.assignee_id)}. You can revert the approval later.`,
+      confirmLabel: "Approve",
+    });
+    if (sure) patchDeliverable(d.id, { status: "approved" }, "Approved. The percentage is unlocked.");
+  };
   const requestChanges = async () => {
     if (!reason.trim()) return notify("Tell them what to change so they know what to fix.", "bad");
     const ok = await patchDeliverable(d.id, { status: "in_progress", feedback: reason.trim() }, "Sent back for changes");
@@ -105,8 +119,8 @@ export function TaskDrawer() {
     }
   };
   const revoke = async () => {
-    if (await askConfirm({ title: "Revoke confirmation?", body: "It goes back to In progress and its percentage is removed from the subject. It must be submitted and confirmed again.", confirmLabel: "Revoke", danger: true }))
-      patchDeliverable(d.id, { status: "in_progress" }, "Confirmation revoked");
+    if (await askConfirm({ title: "Revert this approval?", body: "It goes back to In progress and its percentage is removed from the subject. It must be submitted and confirmed again.", confirmLabel: "Revert approval", danger: true }))
+      patchDeliverable(d.id, { status: "in_progress" }, "Approval reverted");
   };
   const remove = async () => {
     if (await askConfirm({ title: `Delete "${d.title}"?`, body: "Its files are removed. Other weights are re-split evenly.", confirmLabel: "Delete", danger: true }))
@@ -291,6 +305,12 @@ export function TaskDrawer() {
           </Field>
         </section>
 
+        <section className="mt-6 border-t border-line pt-5">
+          <h3 className="font-display text-xl font-semibold tracking-wide">Tasks for this deliverable</h3>
+          <p className="mb-3 mt-0.5 text-xs text-muted">Specific things to do or change. {isAdmin ? "Assign one when you want a fix." : "Tick them off as you finish."}</p>
+          <TaskList subjectId={d.subject_id} deliverableId={d.id} defaultAssignee={d.assignee_id} emptyText={isAdmin ? "No tasks here yet. Assign one if you want something changed." : "No tasks for this deliverable."} />
+        </section>
+
         <section className="mt-6 space-y-3 border-t border-line pt-5">
           {canWork && d.status !== "approved" && d.status !== "pending" && (
             <div className="flex flex-wrap gap-2">
@@ -301,7 +321,11 @@ export function TaskDrawer() {
           {canWork && d.status === "pending" && isOwner && (
             <div className="space-y-2">
               <p className="text-sm text-muted">Submitted. Waiting for the group leader to review it. Withdraw it if you need to change something.</p>
-              <Button onClick={() => patchDeliverable(d.id, { status: "in_progress" }, "Submission withdrawn")}><Undo2 className="h-4 w-4" /> Withdraw submission</Button>
+              <Button
+                onClick={async () => (await askConfirm({ title: "Withdraw your submission?", body: "It leaves the review queue and you can edit it again.", confirmLabel: "Withdraw" })) && patchDeliverable(d.id, { status: "in_progress" }, "Submission withdrawn")}
+              >
+                <Undo2 className="h-4 w-4" /> Withdraw submission
+              </Button>
             </div>
           )}
           {readOnly && <p className="text-sm text-muted">This belongs to an archived semester, so it is read-only.</p>}
@@ -316,14 +340,14 @@ export function TaskDrawer() {
               <div className="flex flex-wrap gap-2">
                 {d.status === "pending" && !rejecting && (
                   <>
-                    <Button variant="ok" onClick={approve}><Check className="h-4 w-4" /> Confirm (+{d.weight}%)</Button>
+                    <Button variant="ok" onClick={approve}><Check className="h-4 w-4" /> Approve (+{d.weight}%)</Button>
                     <Button onClick={() => setRejecting(true)}>Request changes</Button>
                   </>
                 )}
-                {d.status === "approved" && <Button onClick={revoke}>Revoke confirmation</Button>}
+                {d.status === "approved" && <Button onClick={revoke}><Undo2 className="h-4 w-4" /> Revert approval</Button>}
                 <Button variant="danger" onClick={remove} className="ml-auto"><Trash2 className="h-4 w-4" /> Delete</Button>
               </div>
-              {d.status !== "pending" && d.status !== "approved" && <p className="text-xs text-muted">Work is confirmed after it is submitted for review, so nothing counts until it has been checked.</p>}
+              {d.status !== "pending" && d.status !== "approved" && <p className="text-xs text-muted">Work is approved after it is submitted for review, so nothing counts until you have checked it.</p>}
               {rejecting && (
                 <div className="rounded-md border border-line bg-surface2 p-3">
                   <Field label="What needs to change?">

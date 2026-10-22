@@ -11,10 +11,16 @@ Installable as a phone/desktop app (PWA).
   read-only history and starts a fresh one, optionally copying the subject list. Switch between semesters in the sidebar.
 - **Submissions.** App and Website take a deployed link and/or a GitHub repo. PPT, Report, Research Paper and
   Logisim Project take a file upload only. Anything custom takes a link or a file.
+- **Tasks.** The leader can assign small tasks inside any project, before work starts or later when something needs changing. People see theirs under My work and tick them off. Tasks do not change the percentage.
 - **Review first.** Every submission goes to the group leader's Approvals queue. Work only counts once the leader
   confirms it, and the database refuses to confirm anything that was not submitted.
 
 ## Setup
+**Database files, in order:**
+- Fresh project: run `001_init.sql`, then `003_tasks.sql`.
+- Data from the first version: run `002_upgrade_from_v1.sql` (not 001), then `003_tasks.sql`.
+- Already on groups and semesters: run only `003_tasks.sql`.
+
 **Already have data from the first version?** Do not run 001. Run `supabase/migrations/002_upgrade_from_v1.sql` instead.
 It keeps every row and puts it all in one group ("My group") and one semester ("Semester 1"), which you can rename in the app.
 
