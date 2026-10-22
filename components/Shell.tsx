@@ -8,6 +8,7 @@ import {
   LogOut,
   MoreHorizontal,
   Moon,
+  Pencil,
   Plus,
   SlidersHorizontal,
   Stamp,
@@ -63,7 +64,9 @@ function useInstall() {
 }
 
 function GroupSemesterPickers({ compact = false }: { compact?: boolean }) {
-  const { groups, group, switchGroup, semesters, semester, setSemesterId, setShowOnboarding } = useApp();
+  const { groups, group, switchGroup, semesters, semester, setSemesterId, setShowOnboarding, isLeader, renameSemester } = useApp();
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState("");
   const sel = cx(inputCls, compact ? "py-1.5 text-xs" : "py-2 text-sm");
   return (
     <div className={cx("space-y-2", compact && "space-y-1.5")}>
@@ -80,6 +83,24 @@ function GroupSemesterPickers({ compact = false }: { compact?: boolean }) {
             <option key={s.id} value={s.id}>{s.name}{s.status === "current" ? " (current)" : " (archived)"}</option>
           ))}
         </select>
+      )}
+      {isLeader && semester && !renaming && (
+        <button type="button" onClick={() => { setDraft(semester.name); setRenaming(true); }} className={cx("inline-flex items-center gap-1 text-[11px]", compact ? "text-info" : "text-white/60 hover:text-white")}>
+          <Pencil className="h-3 w-3" /> Rename semester
+        </button>
+      )}
+      {isLeader && semester && renaming && (
+        <form
+          className="flex gap-1.5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (draft.trim() && (await renameSemester(draft))) setRenaming(false);
+          }}
+        >
+          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={80} aria-label="Semester name" className={cx(sel, "min-w-0 flex-1")} />
+          <button type="submit" className="rounded-md bg-ok px-2.5 text-xs font-semibold text-white">Save</button>
+          <button type="button" onClick={() => setRenaming(false)} className="rounded-md px-2 text-xs opacity-70 hover:opacity-100">Cancel</button>
+        </form>
       )}
       {!compact && (
         <button type="button" onClick={() => setShowOnboarding(true)} className="inline-flex items-center gap-1 text-[11px] text-white/60 hover:text-white">

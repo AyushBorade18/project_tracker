@@ -41,19 +41,21 @@ body,
   min-height: 100%;
 }
 
-/* App-like behaviour on phones: fit the width, no sideways scroll, no pinch or double-tap zoom, no text auto-resize */
+/* App-like behaviour on phones: no pinch or double-tap zoom, no text auto-resize.
+   IMPORTANT: never put overflow or overscroll rules on html/body. Doing that turns body into its own scroll box,
+   which swallows the mouse wheel and breaks the sticky sidebar. Sideways clipping lives on #__next with
+   overflow-x: clip, which does not create a scroll container. */
 html {
-  width: 100%;
-  overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   touch-action: manipulation;
 }
 
+#__next {
+  overflow-x: clip;
+}
+
 body {
-  width: 100%;
-  overflow-x: hidden;
-  overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
   background: rgb(var(--canvas));
   color: rgb(var(--ink));
