@@ -304,7 +304,7 @@ export function deliverablesCsv(subjects: Subject[], deliverables: Deliverable[]
       effectiveDue(d, s) || "",
       d.submitted_at ? fmtDate(d.submitted_at) : "",
       d.approved_at ? fmtDate(d.approved_at) : "",
-      d.proof_url,
+      [d.live_url, d.repo_url, d.proof_url].filter(Boolean).join(" "),
     ]
       .map(esc)
       .join(",");

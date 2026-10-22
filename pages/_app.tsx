@@ -20,7 +20,7 @@ export default function App({ Component, pageProps }: AppProps) {
     <>
       <Head>
         <title>ProjectTrack: team project tracker</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <meta name="description" content="Track subject deliverables, submissions and approvals for your college project team." />
       </Head>
       <Component {...pageProps} />

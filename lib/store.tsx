@@ -1,11 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { BUCKET, getSupabase } from "./supabase";
-import { ActivityItem, Attachment, Deliverable, Profile, Status, Subject, ViewId } from "./types";
+import { ActivityItem, Attachment, Deliverable, Group, Membership, Profile, Semester, Status, Subject, ViewId } from "./types";
+import { LegacyBackup, dataUrlToFile, mapProof, mapStatus, matchMember, normalizeType } from "./legacy";
 
 type Tone = "ok" | "bad" | "info";
 interface Toast { id: number; msg: string; tone: Tone }
 interface ConfirmOptions { title: string; body?: string; confirmLabel?: string; danger?: boolean }
+interface Me { id: string; email: string; full_name: string }
 
 export interface DeliverablePatch {
   title?: string;
@@ -14,28 +16,48 @@ export interface DeliverablePatch {
   assignee_id?: string | null;
   due_date?: string | null;
   work_made?: string;
+  live_url?: string;
+  repo_url?: string;
   proof_url?: string;
   status?: Status;
   feedback?: string;
 }
 
+export interface ImportResult { subjects: number; deliverables: number; files: number; unmatched: string[] }
+
 interface AppContextValue {
   // auth
   authReady: boolean;
   session: Session | null;
-  profile: Profile | null;
-  profileLoaded: boolean;
   recovery: boolean;
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (name: string, email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
   sendReset: (email: string) => Promise<string | null>;
   setNewPassword: (password: string) => Promise<string | null>;
-  isAdmin: boolean;
+
+  // who I am in the group I am looking at
+  me: Me | null;
+  profile: Profile | null; // null = not a member of any group yet
+  profileLoaded: boolean;
+  isLeader: boolean; // group leader (any semester)
+  isAdmin: boolean; // leader AND the viewed semester is the current one (can edit)
+
+  // groups and semesters
+  groups: Group[];
+  group: Group | null;
+  switchGroup: (id: string) => void;
+  showOnboarding: boolean;
+  setShowOnboarding: (v: boolean) => void;
+  semesters: Semester[];
+  semester: Semester | null; // the one being viewed
+  currentSemester: Semester | null;
+  setSemesterId: (id: string) => void;
+  readOnly: boolean; // viewing an archived semester
 
   // data
   loading: boolean;
-  profiles: Profile[];
+  profiles: Profile[]; // everyone in the group (incl. waiting)
   members: Profile[]; // active people
   subjects: Subject[];
   deliverables: Deliverable[];
@@ -60,6 +82,12 @@ interface AppContextValue {
   closeConfirm: (ok: boolean) => void;
 
   // mutations (all return true on success and toast their own errors)
+  createGroup: (name: string, semesterName: string, subjects: { code: string; name: string }[]) => Promise<boolean>;
+  joinGroup: (code: string) => Promise<boolean>;
+  startSemester: (name: string, copySubjects: boolean) => Promise<boolean>;
+  rotateJoinCode: () => Promise<boolean>;
+  renameGroup: (name: string) => Promise<boolean>;
+  renameSemester: (name: string) => Promise<boolean>;
   updateProfile: (id: string, patch: Partial<Pick<Profile, "full_name" | "role" | "active">>) => Promise<boolean>;
   changeOwnPassword: (password: string) => Promise<boolean>;
   saveSubject: (id: string, patch: Partial<Pick<Subject, "name" | "topic" | "deadline" | "lead_id" | "code">>) => Promise<boolean>;
@@ -73,6 +101,7 @@ interface AppContextValue {
   uploadAttachment: (deliverableId: string, file: File) => Promise<boolean>;
   deleteAttachment: (att: Attachment) => Promise<boolean>;
   openAttachment: (att: Attachment) => Promise<void>;
+  importLegacy: (backup: LegacyBackup) => Promise<ImportResult | null>;
 }
 
 const Ctx = createContext<AppContextValue | null>(null);
@@ -85,6 +114,7 @@ export function useApp(): AppContextValue {
 
 const VIEWS: ViewId[] = ["scoreboard", "board", "mine", "approvals", "analytics", "plan", "team", "activity"];
 const MAX_FILE = 25 * 1024 * 1024;
+const GROUP_KEY = "projecttrack-group";
 
 function viewFromHash(): ViewId {
   if (typeof window === "undefined") return "scoreboard";
@@ -102,11 +132,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [authReady, setAuthReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [recovery, setRecovery] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
+
+  const [me, setMe] = useState<Me | null>(null);
+  const [myMemberships, setMyMemberships] = useState<Membership[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const [semesters, setSemesters] = useState<Semester[]>([]);
+  const [semesterId, setSemesterIdState] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [groupMembers, setGroupMembers] = useState<Membership[]>([]);
+  const [people, setPeople] = useState<{ id: string; email: string; full_name: string; created_at: string }[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -118,6 +157,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<AppContextValue["confirmState"]>(null);
   const toastId = useRef(0);
+
+  // Latest ids for the fetchers (so realtime callbacks never use stale values)
+  const gRef = useRef<string | null>(null);
+  const sRef = useRef<string | null>(null);
+  gRef.current = groupId;
+  sRef.current = semesterId;
 
   // ---------- UI helpers ----------
   useEffect(() => {
@@ -171,13 +216,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setSession(s);
       if (event === "PASSWORD_RECOVERY") setRecovery(true);
       if (event === "SIGNED_OUT") {
-        setProfile(null);
+        setMe(null);
+        setMyMemberships([]);
+        setGroups([]);
         setProfileLoaded(false);
-        setProfiles([]);
+        setGroupId(null);
+        setSemesterIdState(null);
+        setSemesters([]);
+        setGroupMembers([]);
+        setPeople([]);
         setSubjects([]);
         setDeliverables([]);
         setAttachments([]);
         setActivity([]);
+        setShowOnboarding(false);
       }
     });
     return () => sub.subscription.unsubscribe();
@@ -185,23 +237,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const userId = session?.user?.id ?? null;
 
-  const loadProfile = useCallback(async () => {
+  /** My own profile, my memberships and the groups they point to. */
+  const loadMe = useCallback(async () => {
     if (!userId) return;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const { data } = await sb.from("profiles").select("*").eq("id", userId).maybeSingle();
-      if (data) {
-        setProfile(data as Profile);
-        setProfileLoaded(true);
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 400)); // profile row is created by a trigger; give it a moment
+    let prof: Me | null = null;
+    for (let attempt = 0; attempt < 3 && !prof; attempt++) {
+      const { data } = await sb.from("profiles").select("id,email,full_name").eq("id", userId).maybeSingle();
+      if (data) prof = data as Me;
+      else await new Promise((r) => setTimeout(r, 400)); // profile row is created by a trigger; give it a moment
     }
+    const { data: ms } = await sb.from("memberships").select("*").eq("user_id", userId);
+    const memberships = (ms || []) as Membership[];
+    let gs: Group[] = [];
+    if (memberships.length) {
+      const { data } = await sb.from("groups").select("*").in("id", memberships.map((m) => m.group_id));
+      gs = (data || []) as Group[];
+    }
+    setMe(prof);
+    setMyMemberships(memberships);
+    setGroups(gs);
+    setGroupId((cur) => {
+      if (cur && memberships.some((m) => m.group_id === cur)) return cur;
+      let saved: string | null = null;
+      try { saved = localStorage.getItem(GROUP_KEY); } catch { /* ignore */ }
+      if (saved && memberships.some((m) => m.group_id === saved)) return saved;
+      return (memberships.find((m) => m.active) || memberships[0])?.group_id ?? null;
+    });
     setProfileLoaded(true);
   }, [sb, userId]);
 
   useEffect(() => {
-    if (userId) loadProfile();
-  }, [userId, loadProfile]);
+    if (userId) loadMe();
+  }, [userId, loadMe]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
@@ -246,29 +313,81 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [sb]
   );
 
-  // ---------- Data loading ----------
-  const active = Boolean(profile?.active);
+  // ---------- Current group / semester ----------
+  const myMembership = myMemberships.find((m) => m.group_id === groupId) || null;
+  const active = Boolean(myMembership?.active);
+  const group = groups.find((g) => g.id === groupId) || null;
 
+  const switchGroup = useCallback((id: string) => {
+    try { localStorage.setItem(GROUP_KEY, id); } catch { /* ignore */ }
+    setSemesterIdState(null);
+    setSemesters([]);
+    setGroupMembers([]);
+    setPeople([]);
+    setSubjects([]);
+    setDeliverables([]);
+    setAttachments([]);
+    setActivity([]);
+    setOpenTaskId(null);
+    setGroupId(id);
+    setShowOnboarding(false);
+  }, []);
+
+  const setSemesterId = useCallback((id: string) => {
+    setOpenTaskId(null);
+    setSemesterIdState(id);
+  }, []);
+
+  const currentSemester = semesters.find((s) => s.status === "current") || null;
+  const semester = semesters.find((s) => s.id === semesterId) || currentSemester;
+  const readOnly = semester?.status === "archived";
+  const isLeader = myMembership?.role === "admin" && active;
+  const isAdmin = isLeader && !readOnly;
+
+  // ---------- Data loading ----------
   const fetchers = useMemo(
     () => ({
-      profiles: async () => {
-        const { data, error } = await sb.from("profiles").select("*").order("created_at");
-        if (!error && data) setProfiles(data as Profile[]);
+      members: async () => {
+        const g = gRef.current;
+        if (!g) return;
+        const { data: ms } = await sb.from("memberships").select("*").eq("group_id", g).order("created_at");
+        const list = (ms || []) as Membership[];
+        setGroupMembers(list);
+        if (list.length) {
+          const { data: ps } = await sb.from("profiles").select("id,email,full_name,created_at").in("id", list.map((m) => m.user_id));
+          setPeople((ps || []) as { id: string; email: string; full_name: string; created_at: string }[]);
+        }
+      },
+      semesters: async () => {
+        const g = gRef.current;
+        if (!g) return [] as Semester[];
+        const { data } = await sb.from("semesters").select("*").eq("group_id", g).order("started_at");
+        const list = (data || []) as Semester[];
+        setSemesters(list);
+        return list;
       },
       subjects: async () => {
-        const { data, error } = await sb.from("subjects").select("*").order("sort_order").order("created_at");
+        const g = gRef.current, s = sRef.current;
+        if (!g || !s) return;
+        const { data, error } = await sb.from("subjects").select("*").eq("group_id", g).eq("semester_id", s).order("sort_order").order("created_at");
         if (!error && data) setSubjects(data as Subject[]);
       },
       deliverables: async () => {
-        const { data, error } = await sb.from("deliverables").select("*").order("sort_order").order("created_at");
+        const g = gRef.current, s = sRef.current;
+        if (!g || !s) return;
+        const { data, error } = await sb.from("deliverables").select("*").eq("group_id", g).eq("semester_id", s).order("sort_order").order("created_at");
         if (!error && data) setDeliverables(data as Deliverable[]);
       },
       attachments: async () => {
-        const { data, error } = await sb.from("attachments").select("*").order("created_at");
+        const g = gRef.current, s = sRef.current;
+        if (!g || !s) return;
+        const { data, error } = await sb.from("attachments").select("*").eq("group_id", g).eq("semester_id", s).order("created_at");
         if (!error && data) setAttachments(data as Attachment[]);
       },
       activity: async () => {
-        const { data, error } = await sb.from("activity").select("*").order("created_at", { ascending: false }).limit(300);
+        const g = gRef.current, s = sRef.current;
+        if (!g || !s) return;
+        const { data, error } = await sb.from("activity").select("*").eq("group_id", g).eq("semester_id", s).order("created_at", { ascending: false }).limit(300);
         if (!error && data) setActivity(data as ActivityItem[]);
       },
     }),
@@ -276,31 +395,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refreshAll = useCallback(async () => {
-    await Promise.all(Object.values(fetchers).map((f) => f()));
-  }, [fetchers]);
+    await loadMe();
+    await Promise.all([fetchers.members(), fetchers.semesters()]);
+    await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity()]);
+  }, [fetchers, loadMe]);
 
+  // Load the group when it becomes active
   useEffect(() => {
-    if (!active) return;
+    if (!active || !groupId) return;
     let cancelled = false;
     setLoading(true);
-    refreshAll().finally(() => !cancelled && setLoading(false));
+    (async () => {
+      const [, sems] = await Promise.all([fetchers.members(), fetchers.semesters()]);
+      if (cancelled) return;
+      const cur = (sems as Semester[]).find((s) => s.status === "current") || (sems as Semester[])[sems.length - 1];
+      setSemesterIdState((prev) => (prev && (sems as Semester[]).some((s) => s.id === prev) ? prev : cur?.id ?? null));
+    })().finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [active, groupId, fetchers]);
 
-    // Realtime: any change by anyone refreshes just that table (debounced).
+  // Load the semester data whenever the viewed semester changes
+  useEffect(() => {
+    if (!active || !groupId || !semesterId) return;
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity()]).finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [active, groupId, semesterId, fetchers]);
+
+  // Realtime for the group being viewed
+  useEffect(() => {
+    if (!active || !groupId) return;
     const timers: Record<string, ReturnType<typeof setTimeout>> = {};
-    const queue = (table: keyof typeof fetchers) => {
-      clearTimeout(timers[table]);
-      timers[table] = setTimeout(() => {
-        fetchers[table]();
-        if (table === "deliverables") fetchers.activity();
-      }, 150);
+    const queue = (key: string, fn: () => void) => {
+      clearTimeout(timers[key]);
+      timers[key] = setTimeout(fn, 150);
     };
-    const channel = sb.channel("projecttrack-sync");
-    (["profiles", "subjects", "deliverables", "attachments", "activity"] as const).forEach((table) => {
-      channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
-        queue(table);
-        if (table === "profiles") loadProfile();
-      });
-    });
+    const channel = sb.channel(`projecttrack-${groupId}`);
+    const filter = `group_id=eq.${groupId}`;
+    const on = (table: string, fn: () => void) =>
+      channel.on("postgres_changes", { event: "*", schema: "public", table, filter }, () => queue(table, fn));
+    on("deliverables", () => { fetchers.deliverables(); fetchers.activity(); });
+    on("subjects", () => fetchers.subjects());
+    on("attachments", () => fetchers.attachments());
+    on("activity", () => fetchers.activity());
+    on("semesters", () => fetchers.semesters());
+    on("memberships", () => { fetchers.members(); loadMe(); });
     channel.subscribe();
 
     // Safety net if the realtime socket sleeps (laptop lid, phone background)
@@ -308,22 +448,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      cancelled = true;
       Object.values(timers).forEach(clearTimeout);
       document.removeEventListener("visibilitychange", onVisible);
       sb.removeChannel(channel);
     };
-  }, [active, sb, fetchers, refreshAll, loadProfile]);
+  }, [active, groupId, sb, fetchers, refreshAll, loadMe]);
 
-  // A pending member waits on their own profile row; poll lightly in addition to realtime.
+  // A person waiting for approval watches their own membership rows, with a light poll as backup.
   useEffect(() => {
     if (!userId || !profileLoaded || active) return;
-    const t = setInterval(loadProfile, 8000);
-    return () => clearInterval(t);
-  }, [userId, profileLoaded, active, loadProfile]);
+    const ch = sb
+      .channel(`projecttrack-me-${userId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "memberships", filter: `user_id=eq.${userId}` }, () => loadMe())
+      .subscribe();
+    const t = setInterval(loadMe, 8000);
+    return () => {
+      clearInterval(t);
+      sb.removeChannel(ch);
+    };
+  }, [userId, profileLoaded, active, loadMe, sb]);
 
   // ---------- Derived helpers ----------
+  const profiles: Profile[] = useMemo(
+    () =>
+      groupMembers
+        .map((m) => {
+          const p = people.find((x) => x.id === m.user_id);
+          return p ? { id: p.id, email: p.email, full_name: p.full_name, created_at: m.created_at, role: m.role, active: m.active } : null;
+        })
+        .filter((p): p is Profile => p !== null),
+    [groupMembers, people]
+  );
   const members = useMemo(() => profiles.filter((p) => p.active), [profiles]);
+
+  const profile: Profile | null = useMemo(() => {
+    if (!me || !myMembership) return null;
+    return { id: me.id, email: me.email, full_name: me.full_name, created_at: myMembership.created_at, role: myMembership.role, active: myMembership.active };
+  }, [me, myMembership]);
+
   const nameOf = useCallback(
     (id: string | null | undefined) => (id ? profiles.find((p) => p.id === id)?.full_name || "Former member" : "Unassigned"),
     [profiles]
@@ -350,23 +512,107 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [notify]
   );
 
+  const createGroup: AppContextValue["createGroup"] = useCallback(
+    async (name, semesterName, subs) => {
+      try {
+        const { data, error } = await sb.rpc("create_group", { p_name: name, p_semester: semesterName, p_subjects: subs });
+        if (error) { notify(error.message, "bad"); return false; }
+        await loadMe();
+        if (data) switchGroup(data as string);
+        notify("Group created. You are its leader.");
+        return true;
+      } catch (e) {
+        notify(e instanceof Error ? e.message : "Could not create the group.", "bad");
+        return false;
+      }
+    },
+    [sb, notify, loadMe, switchGroup]
+  );
+
+  const joinGroup: AppContextValue["joinGroup"] = useCallback(
+    async (code) => {
+      try {
+        const { data, error } = await sb.rpc("join_group", { p_code: code });
+        if (error) { notify(error.message, "bad"); return false; }
+        await loadMe();
+        if (data) switchGroup(data as string);
+        notify("Request sent. The group leader needs to approve you.");
+        return true;
+      } catch (e) {
+        notify(e instanceof Error ? e.message : "Could not join the group.", "bad");
+        return false;
+      }
+    },
+    [sb, notify, loadMe, switchGroup]
+  );
+
+  const startSemester: AppContextValue["startSemester"] = useCallback(
+    async (name, copy) => {
+      if (!groupId) return false;
+      try {
+        const { data, error } = await sb.rpc("start_new_semester", { p_group: groupId, p_name: name, p_copy_subjects: copy });
+        if (error) { notify(error.message, "bad"); return false; }
+        const sems = await fetchers.semesters();
+        setSemesterIdState((data as string) || sems.find((s) => s.status === "current")?.id || null);
+        notify(`${name} started. The previous semester is saved under the semester switcher.`);
+        return true;
+      } catch (e) {
+        notify(e instanceof Error ? e.message : "Could not start the semester.", "bad");
+        return false;
+      }
+    },
+    [sb, groupId, notify, fetchers]
+  );
+
+  const rotateJoinCode: AppContextValue["rotateJoinCode"] = useCallback(async () => {
+    if (!groupId) return false;
+    const ok = await run(() => sb.rpc("rotate_join_code", { p_group: groupId }), "New join code created. The old one no longer works.");
+    if (ok) await loadMe();
+    return ok;
+  }, [run, sb, groupId, loadMe]);
+
+  const renameGroup: AppContextValue["renameGroup"] = useCallback(
+    async (name) => {
+      if (!groupId) return false;
+      const ok = await run(() => sb.from("groups").update({ name: name.trim() }).eq("id", groupId), "Group renamed");
+      if (ok) await loadMe();
+      return ok;
+    },
+    [run, sb, groupId, loadMe]
+  );
+
+  const renameSemester: AppContextValue["renameSemester"] = useCallback(
+    async (name) => {
+      if (!semesterId || !name.trim()) return false;
+      const ok = await run(() => sb.from("semesters").update({ name: name.trim() }).eq("id", semesterId), "Semester renamed");
+      if (ok) await fetchers.semesters();
+      return ok;
+    },
+    [run, sb, semesterId, fetchers]
+  );
+
   const updateProfile: AppContextValue["updateProfile"] = useCallback(
     async (id, patch) => {
-      const ok = await run(() => sb.from("profiles").update(patch).eq("id", id), "Saved");
+      let ok = true;
+      if (patch.full_name !== undefined) {
+        ok = await run(() => sb.from("profiles").update({ full_name: patch.full_name }).eq("id", id), "Saved");
+      }
+      if (ok && (patch.role !== undefined || patch.active !== undefined) && groupId) {
+        const m: { role?: string; active?: boolean } = {};
+        if (patch.role !== undefined) m.role = patch.role;
+        if (patch.active !== undefined) m.active = patch.active;
+        ok = await run(() => sb.from("memberships").update(m).eq("group_id", groupId).eq("user_id", id), "Saved");
+      }
       if (ok) {
-        await fetchers.profiles();
-        if (id === userId) await loadProfile();
+        await Promise.all([fetchers.members(), loadMe()]);
       }
       return ok;
     },
-    [run, sb, fetchers, userId, loadProfile]
+    [run, sb, groupId, fetchers, loadMe]
   );
 
   const changeOwnPassword: AppContextValue["changeOwnPassword"] = useCallback(
-    async (password) => {
-      const ok = await run(() => sb.auth.updateUser({ password }), "Password changed");
-      return ok;
-    },
+    async (password) => run(() => sb.auth.updateUser({ password }), "Password changed"),
     [run, sb]
   );
 
@@ -381,18 +627,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const addSubject: AppContextValue["addSubject"] = useCallback(
     async (code, name) => {
+      if (!semesterId) return false;
       const sort = (subjects[subjects.length - 1]?.sort_order ?? 0) + 1;
-      const ok = await run(() => sb.from("subjects").insert({ code: code.trim().toUpperCase(), name: name.trim(), sort_order: sort }), `Added ${code.toUpperCase()}`);
+      const ok = await run(
+        () => sb.from("subjects").insert({ semester_id: semesterId, code: code.trim().toUpperCase(), name: name.trim(), sort_order: sort }),
+        `Added ${code.toUpperCase()}`
+      );
       if (ok) await fetchers.subjects();
       return ok;
     },
-    [run, sb, fetchers, subjects]
+    [run, sb, fetchers, subjects, semesterId]
   );
 
   const deleteSubject: AppContextValue["deleteSubject"] = useCallback(
     async (id) => {
       const ok = await run(() => sb.from("subjects").delete().eq("id", id), "Subject deleted");
-      if (ok) await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.activity()]);
+      if (ok) await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity()]);
       return ok;
     },
     [run, sb, fetchers]
@@ -410,9 +660,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const addDeliverable: AppContextValue["addDeliverable"] = useCallback(
     async (subjectId, type, title) => {
       const sort = deliverables.filter((d) => d.subject_id === subjectId).length + 1;
-      const ok = await run(() =>
-        sb.from("deliverables").insert({ subject_id: subjectId, type, title: title.trim(), sort_order: sort })
-      );
+      const ok = await run(() => sb.from("deliverables").insert({ subject_id: subjectId, type, title: title.trim(), sort_order: sort }));
       if (ok) {
         await sb.rpc("rebalance_subject_weights", { p_subject: subjectId });
         await Promise.all([fetchers.deliverables(), fetchers.activity()]);
@@ -456,10 +704,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [run, sb, fetchers]
   );
 
-  const uploadAttachment: AppContextValue["uploadAttachment"] = useCallback(
-    async (deliverableId, file) => {
+  const uploadRaw = useCallback(
+    async (deliverableId: string, file: File, quiet = false): Promise<boolean> => {
       if (file.size > MAX_FILE) {
-        notify(`${file.name} is larger than 25 MB. Paste a Drive or GitHub link instead.`, "bad");
+        notify(`${file.name} is larger than 25 MB. Compress it and try again.`, "bad");
         return false;
       }
       const path = `${deliverableId}/${Date.now()}-${safeName(file.name)}`;
@@ -482,8 +730,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           notify(ins.error.message, "bad");
           return false;
         }
-        await fetchers.attachments();
-        notify(`Uploaded ${file.name}`);
+        if (!quiet) {
+          await fetchers.attachments();
+          notify(`Uploaded ${file.name}`);
+        }
         return true;
       } catch (e) {
         notify(e instanceof Error ? e.message : "Upload failed", "bad");
@@ -492,6 +742,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     },
     [sb, notify, userId, fetchers]
   );
+
+  const uploadAttachment: AppContextValue["uploadAttachment"] = useCallback((id, file) => uploadRaw(id, file), [uploadRaw]);
 
   const deleteAttachment: AppContextValue["deleteAttachment"] = useCallback(
     async (att) => {
@@ -517,17 +769,100 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [sb, notify]
   );
 
+  /** Brings the original app's JSON backup into the semester being viewed (leader only). */
+  const importLegacy: AppContextValue["importLegacy"] = useCallback(
+    async (backup) => {
+      if (!semesterId || !isAdmin) {
+        notify("Switch to the current semester as a group leader to import.", "bad");
+        return null;
+      }
+      const result: ImportResult = { subjects: 0, deliverables: 0, files: 0, unmatched: [] };
+      const idMap = new Map<string, string | null>();
+      backup.members.forEach((m) => {
+        const pid = matchMember(m.name, members);
+        idMap.set(m.id, pid);
+        if (!pid) result.unmatched.push(m.name);
+      });
+
+      try {
+        let sortBase = subjects.length;
+        for (const p of backup.projects) {
+          let subj = subjects.find((s) => s.code.toUpperCase() === p.code);
+          if (!subj) {
+            const { data, error } = await sb
+              .from("subjects")
+              .insert({ semester_id: semesterId, code: p.code, name: p.name, topic: p.topic, deadline: p.deadline || null, lead_id: idMap.get(p.leadId) ?? null, sort_order: ++sortBase })
+              .select("*")
+              .single();
+            if (error || !data) { notify(`${p.code}: ${error?.message || "could not create subject"}`, "bad"); continue; }
+            subj = data as Subject;
+            result.subjects++;
+          } else {
+            const patch: Record<string, unknown> = {};
+            if (!subj.topic && p.topic) patch.topic = p.topic;
+            if (!subj.deadline && p.deadline) patch.deadline = p.deadline;
+            if (!subj.lead_id && idMap.get(p.leadId)) patch.lead_id = idMap.get(p.leadId);
+            if (Object.keys(patch).length) await sb.from("subjects").update(patch).eq("id", subj.id);
+          }
+
+          const existing = deliverables.filter((d) => d.subject_id === subj!.id);
+          let order = existing.length;
+          for (const d of p.deliverables) {
+            const type = normalizeType(d.type);
+            if (existing.some((e) => e.type === type && e.title.toLowerCase() === d.title.toLowerCase())) continue;
+            const proof = mapProof(type, d.proof, d.workMade);
+            const hasWork = Boolean(d.workMade || d.proof || d.attachedFile);
+            const status = mapStatus(d.status, hasWork);
+            const when = d.updatedAt && !isNaN(Date.parse(d.updatedAt)) ? new Date(d.updatedAt).toISOString() : undefined;
+            const row: Record<string, unknown> = {
+              subject_id: subj.id,
+              type,
+              title: d.title,
+              weight: d.weight,
+              assignee_id: idMap.get(d.assignee) ?? null,
+              status,
+              feedback: d.feedback,
+              sort_order: ++order,
+              ...proof,
+            };
+            if (when) {
+              row.created_at = when;
+              if (status === "approved") row.approved_at = when;
+              if (status === "approved" || status === "pending") row.submitted_at = when;
+            }
+            const { data: ins, error } = await sb.from("deliverables").insert(row).select("id").single();
+            if (error || !ins) { notify(`${p.code} ${d.title}: ${error?.message || "skipped"}`, "bad"); continue; }
+            result.deliverables++;
+            if (d.attachedFile) {
+              const f = dataUrlToFile(d.attachedFile.dataUrl, d.attachedFile.name, d.attachedFile.type);
+              if (f && (await uploadRaw((ins as { id: string }).id, f, true))) result.files++;
+            }
+          }
+        }
+        await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity()]);
+        return result;
+      } catch (e) {
+        notify(e instanceof Error ? e.message : "Import stopped unexpectedly.", "bad");
+        await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments()]);
+        return result;
+      }
+    },
+    [semesterId, isAdmin, members, subjects, deliverables, sb, notify, uploadRaw, fetchers]
+  );
+
   const value: AppContextValue = {
-    authReady, session, profile, profileLoaded, recovery,
-    signIn, signUp, signOut, sendReset, setNewPassword,
-    isAdmin: profile?.role === "admin" && Boolean(profile?.active),
+    authReady, session, recovery, signIn, signUp, signOut, sendReset, setNewPassword,
+    me, profile, profileLoaded, isLeader, isAdmin,
+    groups, group, switchGroup, showOnboarding, setShowOnboarding,
+    semesters, semester, currentSemester, setSemesterId, readOnly,
     loading, profiles, members, subjects, deliverables, attachments, activity,
     nameOf, memberIndex, subjectIndex, refreshAll,
     view, setView, openTaskId, openTask: setOpenTaskId, theme, toggleTheme,
     toasts, notify, confirmState, askConfirm, closeConfirm,
+    createGroup, joinGroup, startSemester, rotateJoinCode, renameGroup, renameSemester,
     updateProfile, changeOwnPassword, saveSubject, addSubject, deleteSubject,
     addDeliverable, patchDeliverable, deleteDeliverable, rebalance, bulkAssign,
-    uploadAttachment, deleteAttachment, openAttachment,
+    uploadAttachment, deleteAttachment, openAttachment, importLegacy,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

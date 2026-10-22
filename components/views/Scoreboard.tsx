@@ -159,12 +159,12 @@ export function Scoreboard() {
       />
 
       {/* Score bug */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)]">
         <Panel className="p-5">
           <p className="text-sm text-muted">Overall confirmed</p>
-          <div className="mt-1 flex items-end gap-3">
-            <span className="font-display text-8xl font-semibold leading-[0.85] tabular-nums">{Math.round(overall.confirmedPct)}</span>
-            <span className="pb-2 font-display text-4xl text-muted">%</span>
+          <div className="mt-1 flex flex-wrap items-end gap-x-3 gap-y-2">
+            <span className="font-display text-7xl font-semibold leading-[0.85] tabular-nums sm:text-8xl">{Math.round(overall.confirmedPct)}</span>
+            <span className="pb-1 font-display text-3xl text-muted sm:pb-2 sm:text-4xl">%</span>
             {overall.pendingPct > 0 && <Chip tone="warn" className="mb-3">+{Math.round(overall.pendingPct)}% awaiting</Chip>}
           </div>
           <div className="mt-4"><StackBar confirmed={overall.confirmedPct} pending={overall.pendingPct} height={10} animate /></div>
@@ -199,7 +199,7 @@ export function Scoreboard() {
         )}
       </Panel>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel>
           <PanelHeader title="Team table" hint="Ranked by confirmed points: the weight of every deliverable the leader has signed off." />
           {mStats.length === 0 ? (

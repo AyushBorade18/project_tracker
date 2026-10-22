@@ -41,11 +41,31 @@ body,
   min-height: 100%;
 }
 
+/* App-like behaviour on phones: fit the width, no sideways scroll, no pinch or double-tap zoom, no text auto-resize */
+html {
+  width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
 body {
+  width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
   background: rgb(var(--canvas));
   color: rgb(var(--ink));
   font-family: "IBM Plex Sans", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+button, a, select, summary, label { touch-action: manipulation; }
+
+/* iOS zooms the page when a field under 16px is focused, so keep fields at 16px on small screens */
+@media (max-width: 1023px) {
+  input, select, textarea { font-size: 16px !important; }
 }
 
 :focus-visible {

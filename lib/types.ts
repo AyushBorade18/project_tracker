@@ -1,6 +1,7 @@
 export type Role = "admin" | "member";
 export type Status = "todo" | "in_progress" | "pending" | "approved";
 
+/** A person as seen inside the group you are currently viewing (name from the profile, role/approval from the membership). */
 export interface Profile {
   id: string;
   email: string;
@@ -10,8 +11,34 @@ export interface Profile {
   created_at: string;
 }
 
+export interface Group {
+  id: string;
+  name: string;
+  join_code: string;
+  created_at: string;
+}
+
+export interface Membership {
+  group_id: string;
+  user_id: string;
+  role: Role;
+  active: boolean;
+  created_at: string;
+}
+
+export interface Semester {
+  id: string;
+  group_id: string;
+  name: string;
+  status: "current" | "archived";
+  started_at: string;
+  ended_at: string | null;
+}
+
 export interface Subject {
   id: string;
+  group_id: string;
+  semester_id: string;
   code: string;
   name: string;
   topic: string;
@@ -23,6 +50,8 @@ export interface Subject {
 
 export interface Deliverable {
   id: string;
+  group_id: string;
+  semester_id: string;
   subject_id: string;
   type: string;
   title: string;
@@ -30,6 +59,8 @@ export interface Deliverable {
   assignee_id: string | null;
   status: Status;
   work_made: string;
+  live_url: string;
+  repo_url: string;
   proof_url: string;
   feedback: string;
   due_date: string | null;
@@ -42,6 +73,8 @@ export interface Deliverable {
 
 export interface Attachment {
   id: string;
+  group_id: string;
+  semester_id: string;
   deliverable_id: string;
   storage_path: string;
   file_name: string;
@@ -53,6 +86,8 @@ export interface Attachment {
 
 export interface ActivityItem {
   id: number;
+  group_id: string;
+  semester_id: string | null;
   actor_id: string | null;
   subject_id: string | null;
   deliverable_id: string | null;
@@ -86,3 +121,41 @@ export const STATUS_LABEL: Record<Status, string> = {
   pending: "Awaiting confirmation",
   approved: "Confirmed",
 };
+
+/**
+ * How each deliverable type is proven. This mirrors private.submission_mode() in the database,
+ * which enforces it even if someone bypasses the screen.
+ *  link: a deployed app link or a GitHub repository (App, Website)
+ *  file: an uploaded file only (PPT, Report, Research Paper, Logisim Project)
+ *  any:  a link or a file (anything custom)
+ */
+export type SubmissionKind = "link" | "file" | "any";
+
+export function submissionKind(type: string): SubmissionKind {
+  switch (type.trim().toLowerCase()) {
+    case "app":
+    case "website":
+      return "link";
+    case "ppt":
+    case "report":
+    case "research paper":
+    case "logisim project":
+      return "file";
+    default:
+      return "any";
+  }
+}
+
+export function isHttpUrl(v: string): boolean {
+  return /^https?:\/\/\S+$/i.test(v.trim());
+}
+
+/** The subjects the original ProjectTrack group used, offered as a one-click starting list. */
+export const ORIGINAL_SUBJECTS = [
+  { code: "EDI", name: "Engineering Design & Innovation" },
+  { code: "FODS", name: "Foundations of Data Science" },
+  { code: "DSAM", name: "Digital Systems & Microprocessors" },
+  { code: "DM", name: "Discrete Mathematics" },
+  { code: "OOPS", name: "Object-Oriented Programming" },
+  { code: "DBMS", name: "Database Management Systems" },
+];

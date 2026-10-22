@@ -14,7 +14,7 @@ export function Analytics() {
   return (
     <div>
       <PageTitle title="Analytics" sub="Where the team stands, who is carrying what, and whether the pace will hit the deadlines." />
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Panel className="lg:col-span-2">
           <PanelHeader title="Progress by subject" hint="Share of each subject's weight by stage." />
           <div className="px-2 pb-3"><SubjectProgressChart stats={overall.subjectStats} /></div>

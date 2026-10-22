@@ -17,7 +17,7 @@ export function Approvals() {
       {queue.length === 0 ? (
         <EmptyState title="Queue is clear" body="Nothing is waiting for you. New submissions show up here instantly." />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {queue.map((d) => {
             const s = subjects.find((x) => x.id === d.subject_id);
             const files = attachments.filter((a) => a.deliverable_id === d.id);
@@ -33,9 +33,11 @@ export function Approvals() {
                   {nameOf(d.assignee_id)}{d.submitted_at && `, submitted ${fmtDateTime(d.submitted_at)}`}
                 </p>
                 <div className="mt-3 flex-1 rounded-md border border-line bg-surface2 p-3 text-sm">
-                  <p className="whitespace-pre-wrap">{d.work_made || "No description. Check the files and link."}</p>
-                  {d.proof_url && /^https?:\/\//i.test(d.proof_url) && (
-                    <a href={d.proof_url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 break-all text-xs text-info hover:underline"><ExternalLink className="h-3 w-3 shrink-0" /> {d.proof_url}</a>
+                  <p className="whitespace-pre-wrap">{d.work_made || "No notes. Check the files and links below."}</p>
+                  {[["Deployed app", d.live_url], ["GitHub repo", d.repo_url], ["Link", d.proof_url]].map(([label, url]) =>
+                    url && /^https?:\/\//i.test(url) ? (
+                      <a key={label} href={url} target="_blank" rel="noopener noreferrer" className="mt-2 flex items-center gap-1 break-all text-xs text-info hover:underline"><ExternalLink className="h-3 w-3 shrink-0" /> {label}: {url}</a>
+                    ) : null
                   )}
                   {files.length > 0 && (
                     <ul className="mt-2 space-y-1">

@@ -80,7 +80,7 @@ export function Board() {
       {deliverables.length === 0 ? (
         <EmptyState title="No deliverables planned yet" body={isAdmin ? "Open Plan and switch on what each subject requires." : "The group leader has not planned any deliverables yet."} />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           {COLUMNS.map((st) => {
             const col = filtered.filter((d) => d.status === st);
             return (
