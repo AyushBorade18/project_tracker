@@ -11,15 +11,18 @@ Installable as a phone/desktop app (PWA).
   read-only history and starts a fresh one, optionally copying the subject list. Switch between semesters in the sidebar.
 - **Submissions.** App and Website take a deployed link and/or a GitHub repo. PPT, Report, Research Paper and
   Logisim Project take a file upload only. Anything custom takes a link or a file.
-- **Tasks.** The leader can assign small tasks inside any project, before work starts or later when something needs changing. People see theirs under My work and tick them off. Tasks do not change the percentage.
+- **Tasks.** The leader assigns tasks inside any project, before work starts or later when something needs changing. Tasks follow the same review flow as deliverables: assigned, then the member submits it for review, then the leader approves it. The leader can send a task back with a reason or revert an approval; either returns it to the member as reassigned. Members see their tasks under My work. Tasks never change the confirmed percentage.
+- **Notifications.** A bell shows new assignments, reviews, approvals and reverts live. Members are told when something is assigned or reviewed; leaders are told when something is submitted. Phone and desktop alerts work while the app is open in the background (opt in from the bell). Alerts when the app is fully closed would need push notifications or email, which this version does not include.
+- **Weights.** Changing one deliverable's weight offers a rebalance: pick which others give up (or receive) the difference and it is shared evenly so the total stays 100%.
+- **Theme.** Light by default. Light, Auto (follows the device) or Dark in the sidebar.
 - **Review first.** Every submission goes to the group leader's Approvals queue. Work only counts once the leader
   confirms it, and the database refuses to confirm anything that was not submitted.
 
 ## Setup
 **Database files, in order:**
-- Fresh project: run `001_init.sql`, then `003_tasks.sql`.
-- Data from the first version: run `002_upgrade_from_v1.sql` (not 001), then `003_tasks.sql`.
-- Already on groups and semesters: run only `003_tasks.sql`.
+- Fresh project: run `001_init.sql`, then `003_tasks.sql`, then `004_notifications_weights.sql`.
+- Data from the first version: run `002_upgrade_from_v1.sql` (not 001), then 003, then 004.
+- Already on groups and semesters: run `003_tasks.sql` again (it upgrades the tasks table in place and keeps every task), then `004_notifications_weights.sql`. Both are safe to run twice.
 
 **Already have data from the first version?** Do not run 001. Run `supabase/migrations/002_upgrade_from_v1.sql` instead.
 It keeps every row and puts it all in one group ("My group") and one semester ("Semester 1"), which you can rename in the app.

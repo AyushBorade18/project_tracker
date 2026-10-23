@@ -311,3 +311,34 @@ export function deliverablesCsv(subjects: Subject[], deliverables: Deliverable[]
   });
   return [head.map(esc).join(","), ...rows].join("\n");
 }
+
+/**
+ * When one deliverable's weight changes, the difference is shared evenly among the chosen others so the
+ * subject keeps adding up to 100. Nobody goes below 0 or above 100: if someone cannot give or take their
+ * share, the rest is spread over the others who still can.
+ */
+export function distributeWeights(
+  others: { id: string; weight: number }[],
+  chosenIds: string[],
+  delta: number
+): { id: string; weight: number }[] {
+  const pool = others.filter((o) => chosenIds.includes(o.id)).map((o) => ({ ...o }));
+  if (pool.length === 0 || delta === 0) return [];
+  let remaining = Math.abs(delta);
+  const sign = delta > 0 ? -1 : 1; // raising one means the others go down, and vice versa
+  let guard = 0;
+  while (remaining > 0 && guard++ < 200) {
+    const able = pool.filter((p) => (sign < 0 ? p.weight > 0 : p.weight < 100));
+    if (able.length === 0) break;
+    const share = Math.max(1, Math.floor(remaining / able.length));
+    for (const p of able) {
+      if (remaining <= 0) break;
+      const room = sign < 0 ? p.weight : 100 - p.weight;
+      const step = Math.min(share, room, remaining);
+      p.weight += sign * step;
+      remaining -= step;
+    }
+  }
+  const original = new Map(others.map((o) => [o.id, o.weight]));
+  return pool.filter((p) => p.weight !== original.get(p.id)).map((p) => ({ id: p.id, weight: p.weight }));
+}

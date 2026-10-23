@@ -93,11 +93,29 @@ export interface Task {
   title: string;
   details: string;
   assignee_id: string | null;
-  status: "open" | "done";
+  /** open = assigned, review = submitted and waiting for the leader, done = approved */
+  status: "open" | "review" | "done";
+  note: string;
+  feedback: string;
   due_date: string | null;
   created_by: string | null;
   created_at: string;
+  submitted_at: string | null;
   done_at: string | null;
+}
+
+export interface AppNotification {
+  id: string;
+  group_id: string;
+  semester_id: string | null;
+  user_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  deliverable_id: string | null;
+  task_id: string | null;
+  read_at: string | null;
+  created_at: string;
 }
 
 export interface ActivityItem {

@@ -30,6 +30,10 @@ import { Team } from "./views/Team";
 import { Activity } from "./views/Activity";
 import { TaskDrawer } from "./TaskDrawer";
 import { WorkspaceMenu } from "./WorkspaceMenu";
+import { NotificationBell } from "./NotificationBell";
+import { ThemeSwitch } from "./ThemeSwitch";
+import { WeightDialog } from "./WeightDialog";
+import { ScrollEffects } from "./motion";
 
 type Icon = React.ComponentType<{ className?: string }>;
 const NAV: { id: ViewId; label: string; icon: Icon; admin?: boolean }[] = [
@@ -67,15 +71,20 @@ function useInstall() {
 export function Shell() {
   const install = useInstall();
   const {
-    view, setView, isAdmin, isLeader, profile, profiles, deliverables, theme, toggleTheme, signOut, toasts, confirmState, closeConfirm,
+    view, setView, isAdmin, isLeader, profile, profiles, deliverables, tasks, signOut, toasts, confirmState, closeConfirm,
     loading, memberIndex, askConfirm, readOnly, semester, currentSemester, setSemesterId, setShowOnboarding, group,
   } = useApp();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const pendingCount = useMemo(() => deliverables.filter((d) => d.status === "pending").length, [deliverables]);
+  const pendingCount = useMemo(
+    () => deliverables.filter((d) => d.status === "pending").length + tasks.filter((t) => t.status === "review").length,
+    [deliverables, tasks]
+  );
   const mineOpen = useMemo(
-    () => deliverables.filter((d) => d.assignee_id === profile?.id && d.status !== "approved" && d.status !== "pending").length,
-    [deliverables, profile]
+    () =>
+      deliverables.filter((d) => d.assignee_id === profile?.id && d.status !== "approved" && d.status !== "pending").length +
+      tasks.filter((t) => t.assignee_id === profile?.id && t.status === "open").length,
+    [deliverables, tasks, profile]
   );
   const waiting = profiles.filter((p) => !p.active).length;
 
@@ -101,7 +110,8 @@ export function Shell() {
         <div className="px-5 pt-6">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white font-display text-base font-bold tracking-wide text-rail">PT</div>
-            <span className="font-display text-xl font-semibold tracking-wide">ProjectTrack</span>
+            <span className="flex-1 font-display text-xl font-semibold tracking-wide">ProjectTrack</span>
+            <NotificationBell variant="rail" />
           </div>
           <div className="mt-5"><WorkspaceMenu variant="rail" /></div>
         </div>
@@ -138,15 +148,10 @@ export function Shell() {
               <DownloadIcon className="h-3.5 w-3.5" /> Install app
             </button>
           )}
-          <div className="mt-3 flex gap-2">
-            <button type="button" onClick={toggleTheme} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 py-1.5 text-xs hover:bg-white/20">
-              {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-              {theme === "dark" ? "Light" : "Dark"}
-            </button>
-            <button type="button" onClick={confirmSignOut} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-white/10 py-1.5 text-xs hover:bg-white/20">
-              <LogOut className="h-3.5 w-3.5" /> Sign out
-            </button>
-          </div>
+          <div className="mt-3"><ThemeSwitch /></div>
+          <button type="button" onClick={confirmSignOut} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md bg-white/10 py-1.5 text-xs hover:bg-white/20">
+            <LogOut className="h-3.5 w-3.5" /> Sign out
+          </button>
         </div>
       </aside>
 
@@ -158,11 +163,12 @@ export function Shell() {
           {install && (
             <button type="button" onClick={install} className="rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-rail">Install</button>
           )}
+          <NotificationBell variant="bar" />
         </div>
       </header>
 
-      <main className="min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-8 lg:pb-8 lg:pt-8">
-        <div className="mx-auto max-w-6xl">
+      <main className="relative z-[1] min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-8 lg:pb-8 lg:pt-8">
+        <div key={current} className="page-in mx-auto max-w-6xl">
           {readOnly && (
             <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-info/40 bg-info/10 px-4 py-2.5 text-sm">
               <span>You are viewing <strong>{semester?.name}</strong>, an archived semester. It is read-only.</span>
@@ -247,15 +253,17 @@ export function Shell() {
                 <p className="text-xs text-muted">{isLeader ? "Group leader" : "Team member"}</p>
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Button onClick={toggleTheme}>{theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />} {theme === "dark" ? "Light mode" : "Dark mode"}</Button>
-              <Button onClick={() => { setMoreOpen(false); confirmSignOut(); }}><LogOut className="h-4 w-4" /> Sign out</Button>
+            <div className="mt-3 space-y-2">
+              <ThemeSwitch tone="light" />
+              <Button className="w-full" onClick={() => { setMoreOpen(false); confirmSignOut(); }}><LogOut className="h-4 w-4" /> Sign out</Button>
             </div>
           </div>
         </div>
       )}
 
+      <ScrollEffects />
       <TaskDrawer />
+      <WeightDialog />
       {confirmState && (
         <ConfirmDialog title={confirmState.title} body={confirmState.body} confirmLabel={confirmState.confirmLabel} danger={confirmState.danger} onClose={closeConfirm} />
       )}

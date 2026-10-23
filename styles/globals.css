@@ -110,3 +110,93 @@ button, a, select, summary, label { touch-action: manipulation; }
 .scroll-thin::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 999px; }
 
 .recharts-tooltip-wrapper { outline: none; }
+
+/* ---------- Motion: scroll reveal, page transition, 3D tilt, parallax orbs ---------- */
+.reveal {
+  opacity: 0;
+  transform: translate3d(0, 26px, 0) scale(0.985);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--d, 0ms);
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+.page-in { animation: page-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.tilt {
+  transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.tilt.moving { transition: transform 0.08s linear; }
+.tilt-glare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 0%), rgba(255, 255, 255, 0.2), transparent 55%);
+  opacity: var(--go, 0);
+  transition: opacity 0.3s;
+}
+
+.lift { transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.25s, border-color 0.25s; }
+@media (hover: hover) {
+  .lift:hover { transform: translate3d(0, -3px, 0); box-shadow: 0 14px 30px -16px rgb(var(--ink) / 0.35); }
+}
+
+/* Soft colour orbs behind the content; they drift slower than the page for depth */
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  will-change: transform;
+}
+.orb-a { width: 38rem; height: 38rem; left: -10rem; top: 4rem; background: rgb(var(--info) / 0.16); }
+.orb-b { width: 32rem; height: 32rem; right: -8rem; top: 30rem; background: rgb(var(--ok) / 0.14); }
+.orb-c { width: 28rem; height: 28rem; left: 35%; top: 70rem; background: rgb(var(--warn) / 0.1); }
+[data-theme="dark"] .orb-a { background: rgb(var(--info) / 0.12); }
+[data-theme="dark"] .orb-b { background: rgb(var(--ok) / 0.09); }
+[data-theme="dark"] .orb-c { background: rgb(var(--warn) / 0.06); }
+
+/* Scoreboard hero: a slowly moving gradient mesh inside the dark score card */
+.hero-mesh { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.hero-mesh::before,
+.hero-mesh::after {
+  content: "";
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(46px);
+  will-change: transform;
+}
+.hero-mesh::before {
+  width: 22rem; height: 22rem; right: -6rem; top: -8rem;
+  background: radial-gradient(circle, rgba(47, 111, 237, 0.65), transparent 65%);
+  animation: drift-a 14s ease-in-out infinite alternate;
+}
+.hero-mesh::after {
+  width: 20rem; height: 20rem; left: -5rem; bottom: -9rem;
+  background: radial-gradient(circle, rgba(34, 197, 154, 0.5), transparent 65%);
+  animation: drift-b 17s ease-in-out infinite alternate;
+}
+@keyframes drift-a { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-3rem, 2.5rem, 0) scale(1.15); } }
+@keyframes drift-b { from { transform: translate3d(0, 0, 0) scale(1.1); } to { transform: translate3d(3.5rem, -2rem, 0) scale(0.95); } }
+
+/* Waiting-for-review stripes slowly move so they read as "in progress" */
+.hatch { background-size: 14.14px 14.14px; animation: hatch-move 1.6s linear infinite; }
+@keyframes hatch-move { from { background-position: 0 0; } to { background-position: 14.14px 0; } }
+
+.glass { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14); backdrop-filter: blur(6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .page-in, .hatch, .hero-mesh::before, .hero-mesh::after { animation: none; }
+  .tilt { transform: none !important; }
+  .lift:hover { transform: none; }
+}

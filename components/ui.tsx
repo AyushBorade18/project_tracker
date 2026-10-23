@@ -179,6 +179,7 @@ export function CommitInput({
   type = "text",
   multiline,
   rows = 3,
+  resetOnCommit,
 }: {
   value: string;
   onCommit: (v: string) => void;
@@ -188,6 +189,8 @@ export function CommitInput({
   type?: string;
   multiline?: boolean;
   rows?: number;
+  /** snap back to the stored value after committing (used when the change needs confirming first) */
+  resetOnCommit?: boolean;
 }) {
   const [local, setLocal] = useState(value);
   const focused = useRef(false);
@@ -197,6 +200,7 @@ export function CommitInput({
   const commit = () => {
     focused.current = false;
     if (local !== value) onCommit(local);
+    if (resetOnCommit) setLocal(value);
   };
   const common = {
     value: local,

@@ -9,7 +9,7 @@ import { Button, Chip, CommitInput, EmptyState, Field, PageTitle, Panel, Subject
 function SubjectPlan({ subject }: { subject: Subject }) {
   const {
     deliverables, members, subjectIndex, saveSubject, deleteSubject, addDeliverable, patchDeliverable, deleteDeliverable,
-    rebalance, bulkAssign, openTask, askConfirm, attachments, notify,
+    rebalance, bulkAssign, openTask, askConfirm, attachments, notify, requestWeightChange,
   } = useApp();
   const items = deliverables.filter((d) => d.subject_id === subject.id).sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at));
   const sum = items.reduce((a, d) => a + (d.weight || 0), 0);
@@ -95,7 +95,7 @@ function SubjectPlan({ subject }: { subject: Subject }) {
           <div className="flex flex-wrap items-center justify-between gap-2 bg-surface2 px-4 py-2">
             <div className="flex items-center gap-2">
               <Chip tone={sum === 100 ? "ok" : "bad"}>Weights total {sum}%</Chip>
-              {sum !== 100 && <span className="text-xs text-muted">They should add up to 100%. Percentages are scaled until you fix this.</span>}
+              {sum !== 100 && <span className="text-xs text-muted">They should add up to 100%. Change a weight to be offered a rebalance, or split evenly.</span>}
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -125,13 +125,22 @@ function SubjectPlan({ subject }: { subject: Subject }) {
           <ul className="divide-y divide-line">
             {items.map((d) => (
               <li key={d.id} className="grid grid-cols-1 items-center gap-2 px-4 py-3 sm:grid-cols-12">
-                <div className="sm:col-span-1"><Chip>{d.type}</Chip></div>
-                <div className="sm:col-span-4"><CommitInput value={d.title} onCommit={(v) => v.trim() && patchDeliverable(d.id, { title: v.trim() })} aria-label="Title" /></div>
-                <div className="flex items-center gap-1 sm:col-span-1">
-                  <CommitInput type="number" value={String(d.weight)} onCommit={(v) => patchDeliverable(d.id, { weight: Math.max(0, Math.min(100, Number(v) || 0)) })} className="text-right" />
-                  <span className="text-xs text-muted">%</span>
+                <div className="sm:col-span-2"><Chip>{d.type}</Chip></div>
+                <div className="sm:col-span-3"><CommitInput value={d.title} onCommit={(v) => v.trim() && patchDeliverable(d.id, { title: v.trim() })} aria-label="Title" /></div>
+                <div className="flex items-center gap-1.5 sm:col-span-2">
+                  <CommitInput
+                    type="number"
+                    resetOnCommit
+                    value={String(d.weight)}
+                    onCommit={(v) => {
+                      const n = Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+                      if (n !== d.weight) requestWeightChange(d.id, n);
+                    }}
+                    className="min-w-[5rem] text-right text-base font-semibold tabular-nums"
+                  />
+                  <span className="text-sm text-muted">%</span>
                 </div>
-                <div className="sm:col-span-3">
+                <div className="sm:col-span-2">
                   <select className={inputCls} value={d.assignee_id || ""} onChange={(e) => patchDeliverable(d.id, { assignee_id: e.target.value || null })} aria-label="Assignee">
                     <option value="">Unassigned</option>
                     {members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}

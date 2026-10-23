@@ -11,7 +11,7 @@ const STEPS: Status[] = ["todo", "in_progress", "pending", "approved"];
 export function TaskDrawer() {
   const {
     openTaskId, openTask, deliverables, subjects, attachments, activity, members, profile, isAdmin, readOnly, nameOf, memberIndex, subjectIndex,
-    patchDeliverable, deleteDeliverable, uploadAttachment, deleteAttachment, openAttachment, askConfirm, notify,
+    patchDeliverable, deleteDeliverable, uploadAttachment, deleteAttachment, openAttachment, askConfirm, notify, requestWeightChange,
   } = useApp();
 
   const d = deliverables.find((x) => x.id === openTaskId) || null;
@@ -120,7 +120,7 @@ export function TaskDrawer() {
   };
   const revoke = async () => {
     if (await askConfirm({ title: "Revert this approval?", body: "It goes back to In progress and its percentage is removed from the subject. It must be submitted and confirmed again.", confirmLabel: "Revert approval", danger: true }))
-      patchDeliverable(d.id, { status: "in_progress" }, "Approval reverted");
+      patchDeliverable(d.id, { status: "in_progress", feedback: "Approval reverted. Please check it and submit again." }, "Approval reverted. It is reassigned to " + nameOf(d.assignee_id));
   };
   const remove = async () => {
     if (await askConfirm({ title: `Delete "${d.title}"?`, body: "Its files are removed. Other weights are re-split evenly.", confirmLabel: "Delete", danger: true }))
@@ -179,7 +179,7 @@ export function TaskDrawer() {
 
         {d.feedback && d.status === "in_progress" && (
           <div role="alert" className="mt-5 rounded-md border border-bad/30 bg-bad/10 px-3.5 py-3 text-sm">
-            <p className="font-semibold text-bad">Changes requested</p>
+            <p className="font-semibold text-bad">{d.feedback.startsWith("Approval reverted") ? "Reassigned to you" : "Changes requested"}</p>
             <p className="mt-1 text-ink">{d.feedback}</p>
           </div>
         )}
@@ -205,7 +205,7 @@ export function TaskDrawer() {
             <dt className="text-xs text-muted">Weight in {subject?.code}</dt>
             <dd className="mt-1">
               {isAdmin ? (
-                <CommitInput type="number" value={String(d.weight)} onCommit={(v) => patchDeliverable(d.id, { weight: Math.max(0, Math.min(100, Number(v) || 0)) })} />
+                <CommitInput type="number" resetOnCommit value={String(d.weight)} className="min-w-[5rem] text-base font-semibold" onCommit={(v) => { const n = Math.max(0, Math.min(100, Math.round(Number(v) || 0))); if (n !== d.weight) requestWeightChange(d.id, n); }} />
               ) : (
                 <span className="font-display text-2xl font-semibold">{d.weight}%</span>
               )}

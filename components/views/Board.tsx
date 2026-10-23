@@ -18,7 +18,7 @@ export function TaskCard({ d }: { d: Deliverable }) {
     <button
       type="button"
       onClick={() => openTask(d.id)}
-      className="w-full rounded-md border border-line bg-surface p-3 text-left shadow-sm transition hover:border-info/60 hover:shadow-lift"
+      className="lift w-full rounded-md border border-line bg-surface p-3 text-left shadow-sm hover:border-info/60"
     >
       <div className="flex items-center justify-between gap-2">
         {subject && <SubjectTag code={subject.code} index={subjectIndex(subject.id)} />}

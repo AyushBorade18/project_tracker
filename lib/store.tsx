@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { BUCKET, getSupabase } from "./supabase";
-import { ActivityItem, Attachment, Deliverable, Group, Membership, Profile, Semester, Status, Subject, Task, ViewId } from "./types";
+import { ActivityItem, AppNotification, Attachment, Deliverable, Group, Membership, Profile, Semester, Status, Subject, Task, ViewId } from "./types";
 import { LegacyBackup, dataUrlToFile, mapProof, mapStatus, matchMember, normalizeType } from "./legacy";
 
 type Tone = "ok" | "bad" | "info";
@@ -75,7 +75,18 @@ interface AppContextValue {
   openTaskId: string | null;
   openTask: (id: string | null) => void;
   theme: "light" | "dark";
-  toggleTheme: () => void;
+  themePref: "light" | "system" | "dark";
+  setThemePref: (p: "light" | "system" | "dark") => void;
+  notifications: AppNotification[];
+  unreadCount: number;
+  markRead: (id: string) => Promise<void>;
+  markAllRead: () => Promise<void>;
+  alertsPermission: "default" | "granted" | "denied" | "unsupported";
+  enableAlerts: () => Promise<void>;
+  weightChange: { id: string; newWeight: number } | null;
+  requestWeightChange: (id: string, newWeight: number) => void;
+  closeWeightChange: () => void;
+  applyWeights: (changes: { id: string; weight: number }[]) => Promise<boolean>;
   toasts: Toast[];
   notify: (msg: string, tone?: Tone) => void;
   confirmState: (ConfirmOptions & { resolve: (ok: boolean) => void }) | null;
@@ -104,7 +115,7 @@ interface AppContextValue {
   openAttachment: (att: Attachment) => Promise<void>;
   importLegacy: (backup: LegacyBackup) => Promise<ImportResult | null>;
   addTask: (t: { subject_id: string; title: string; assignee_id?: string | null; due_date?: string | null; deliverable_id?: string | null; details?: string }) => Promise<boolean>;
-  patchTask: (id: string, patch: Partial<Pick<Task, "title" | "details" | "assignee_id" | "due_date" | "status" | "deliverable_id">>, okMsg?: string) => Promise<boolean>;
+  patchTask: (id: string, patch: Partial<Pick<Task, "title" | "details" | "assignee_id" | "due_date" | "status" | "deliverable_id" | "note" | "feedback">>, okMsg?: string) => Promise<boolean>;
   deleteTask: (id: string) => Promise<boolean>;
 }
 
@@ -159,6 +170,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [view, setViewState] = useState<ViewId>("scoreboard");
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [themePref, setThemePrefState] = useState<"light" | "system" | "dark">("light");
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [alertsPermission, setAlertsPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
+  const [weightChange, setWeightChange] = useState<{ id: string; newWeight: number } | null>(null);
+  const seenNotif = useRef<Set<string>>(new Set());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirmState, setConfirmState] = useState<AppContextValue["confirmState"]>(null);
   const toastId = useRef(0);
@@ -174,8 +190,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setViewState(viewFromHash());
     const onHash = () => setViewState(viewFromHash());
     window.addEventListener("hashchange", onHash);
-    const t = document.documentElement.getAttribute("data-theme");
-    setTheme(t === "dark" ? "dark" : "light");
+    let pref: "light" | "system" | "dark" = "light";
+    try {
+      const saved = localStorage.getItem("projecttrack-theme-pref");
+      if (saved === "light" || saved === "dark" || saved === "system") pref = saved;
+    } catch { /* ignore */ }
+    setThemePrefState(pref);
+    if (typeof Notification === "undefined") setAlertsPermission("unsupported");
+    else setAlertsPermission(Notification.permission as "default" | "granted" | "denied");
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
@@ -185,13 +207,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setOpenTaskId(null);
   }, []);
 
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", next);
-      try { localStorage.setItem("projecttrack-theme", next); } catch { /* preference only */ }
-      return next;
-    });
+  // Light by default. "system" follows the device and updates live if the device switches.
+  useEffect(() => {
+    const apply = () => {
+      const eff = themePref === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : themePref;
+      document.documentElement.setAttribute("data-theme", eff);
+      setTheme(eff);
+    };
+    apply();
+    if (themePref !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [themePref]);
+
+  const setThemePref = useCallback((p: "light" | "system" | "dark") => {
+    setThemePrefState(p);
+    try { localStorage.setItem("projecttrack-theme-pref", p); } catch { /* preference only */ }
   }, []);
 
   const notify = useCallback((msg: string, tone: Tone = "ok") => {
@@ -901,6 +933,86 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [semesterId, isAdmin, members, subjects, deliverables, sb, notify, uploadRaw, fetchers]
   );
 
+  // ---------- Notifications (bell) ----------
+  const loadNotifications = useCallback(async () => {
+    if (!userId || !groupId) return;
+    const { data, error } = await sb
+      .from("notifications")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("group_id", groupId)
+      .order("created_at", { ascending: false })
+      .limit(60);
+    if (!error && data) {
+      (data as AppNotification[]).forEach((n) => seenNotif.current.add(n.id));
+      setNotifications(data as AppNotification[]);
+    }
+  }, [sb, userId, groupId]);
+
+  useEffect(() => {
+    if (!active || !userId || !groupId) return;
+    seenNotif.current = new Set();
+    setNotifications([]);
+    loadNotifications();
+    const ch = sb
+      .channel(`projecttrack-notif-${userId}-${groupId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` }, (payload) => {
+        const n = payload.new as AppNotification;
+        if (n.group_id !== groupId || seenNotif.current.has(n.id)) return;
+        seenNotif.current.add(n.id);
+        setNotifications((prev) => [n, ...prev].slice(0, 60));
+        notify(`${n.title}: ${n.body}`, "info");
+        // Phone/desktop alert when the app is open but in the background (needs permission, see enableAlerts)
+        if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.visibilityState === "hidden") {
+          try { new Notification(n.title, { body: n.body, icon: "/icons/icon-192.png", tag: n.id }); } catch { /* some browsers need a service worker for this */ }
+        }
+      })
+      .subscribe();
+    const onVisible = () => document.visibilityState === "visible" && loadNotifications();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      sb.removeChannel(ch);
+    };
+  }, [active, userId, groupId, sb, loadNotifications, notify]);
+
+  const unreadCount = useMemo(() => notifications.filter((n) => !n.read_at).length, [notifications]);
+
+  const markRead = useCallback(
+    async (id: string) => {
+      const now = new Date().toISOString();
+      setNotifications((prev) => prev.map((n) => (n.id === id && !n.read_at ? { ...n, read_at: now } : n)));
+      await sb.from("notifications").update({ read_at: now }).eq("id", id);
+    },
+    [sb]
+  );
+
+  const markAllRead = useCallback(async () => {
+    if (!userId || !groupId) return;
+    const now = new Date().toISOString();
+    setNotifications((prev) => prev.map((n) => (n.read_at ? n : { ...n, read_at: now })));
+    await sb.from("notifications").update({ read_at: now }).eq("user_id", userId).eq("group_id", groupId).is("read_at", null);
+  }, [sb, userId, groupId]);
+
+  const enableAlerts = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+    const p = await Notification.requestPermission();
+    setAlertsPermission(p as "default" | "granted" | "denied");
+  }, []);
+
+  // ---------- Weight rebalancing ----------
+  const requestWeightChange = useCallback((id: string, newWeight: number) => setWeightChange({ id, newWeight }), []);
+  const closeWeightChange = useCallback(() => setWeightChange(null), []);
+  const applyWeights = useCallback(
+    async (changes: { id: string; weight: number }[]) => {
+      const ok = await run(() => sb.rpc("set_weights", { p_changes: changes }), "Weights updated");
+      if (ok) await fetchers.deliverables();
+      setWeightChange(null);
+      return ok;
+    },
+    [run, sb, fetchers]
+  );
+
   const value: AppContextValue = {
     authReady, session, recovery, signIn, signUp, signOut, sendReset, setNewPassword,
     me, profile, profileLoaded, isLeader, isAdmin,
@@ -908,13 +1020,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     semesters, semester, currentSemester, setSemesterId, readOnly,
     loading, profiles, members, subjects, deliverables, attachments, activity, tasks,
     nameOf, memberIndex, subjectIndex, refreshAll,
-    view, setView, openTaskId, openTask: setOpenTaskId, theme, toggleTheme,
+    view, setView, openTaskId, openTask: setOpenTaskId, theme, themePref, setThemePref,
     toasts, notify, confirmState, askConfirm, closeConfirm,
     createGroup, joinGroup, startSemester, rotateJoinCode, renameGroup, renameSemester,
     updateProfile, changeOwnPassword, saveSubject, addSubject, deleteSubject,
     addDeliverable, patchDeliverable, deleteDeliverable, rebalance, bulkAssign,
     uploadAttachment, deleteAttachment, openAttachment, importLegacy,
     addTask, patchTask, deleteTask,
+    notifications, unreadCount, markRead, markAllRead, alertsPermission, enableAlerts,
+    weightChange, requestWeightChange, closeWeightChange, applyWeights,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

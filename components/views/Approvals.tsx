@@ -3,15 +3,19 @@ import { Check, ExternalLink, Paperclip } from "lucide-react";
 import { useApp } from "../../lib/store";
 import { fmtDate, fmtDateTime } from "../../lib/calc";
 import { Undo2 } from "lucide-react";
+import { TaskRow } from "../TaskList";
 import { Avatar, Button, EmptyState, PageTitle, Panel, SubjectTag, inputCls } from "../ui";
 
 export function Approvals() {
-  const { deliverables, subjects, attachments, nameOf, memberIndex, subjectIndex, openTask, patchDeliverable, openAttachment, notify, askConfirm } = useApp();
+  const { deliverables, tasks, subjects, attachments, nameOf, memberIndex, subjectIndex, openTask, patchDeliverable, openAttachment, notify, askConfirm } = useApp();
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
 
   const queue = deliverables.filter((d) => d.status === "pending").sort((a, b) => (a.submitted_at || "").localeCompare(b.submitted_at || ""));
   const recent = deliverables.filter((d) => d.status === "approved").sort((a, b) => (b.approved_at || "").localeCompare(a.approved_at || "")).slice(0, 10);
+
+  const reviewTasks = tasks.filter((t) => t.status === "review").sort((a, b) => (a.submitted_at || "").localeCompare(b.submitted_at || ""));
+  const doneTasks = tasks.filter((t) => t.status === "done").sort((a, b) => (b.done_at || "").localeCompare(a.done_at || "")).slice(0, 8);
 
   const approve = async (d: (typeof queue)[number]) => {
     const s = subjects.find((x) => x.id === d.subject_id);
@@ -26,19 +30,19 @@ export function Approvals() {
   const revert = async (d: (typeof recent)[number]) => {
     const sure = await askConfirm({
       title: `Revert the approval of "${d.title}"?`,
-      body: "It goes back to In progress and its percentage is removed from the subject. It has to be submitted and approved again.",
+      body: "It goes back to the assignee as reassigned and its percentage is removed from the subject. It has to be submitted and approved again.",
       confirmLabel: "Revert approval",
       danger: true,
     });
-    if (sure) patchDeliverable(d.id, { status: "in_progress" }, "Approval reverted");
+    if (sure) patchDeliverable(d.id, { status: "in_progress", feedback: "Approval reverted. Please check it and submit again." }, "Approval reverted. It is reassigned to " + nameOf(d.assignee_id));
   };
 
   return (
     <div>
       <PageTitle title="Approvals" sub="Oldest submission first. Approving a deliverable adds its weight to the subject percentage. You can revert an approval any time." />
-      {queue.length === 0 ? (
+      {queue.length === 0 && reviewTasks.length === 0 ? (
         <EmptyState title="Queue is clear" body="Nothing is waiting for you. New submissions show up here instantly." />
-      ) : (
+      ) : queue.length === 0 ? null : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {queue.map((d) => {
             const s = subjects.find((x) => x.id === d.subject_id);
@@ -90,6 +94,20 @@ export function Approvals() {
             );
           })}
         </div>
+      )}
+
+      {reviewTasks.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-2 font-display text-xl font-semibold tracking-wide">Tasks awaiting review <span className="text-muted">({reviewTasks.length})</span></h2>
+          <Panel><ul className="divide-y divide-line">{reviewTasks.map((t) => <TaskRow key={t.id} task={t} showSubject defaultOpen />)}</ul></Panel>
+        </section>
+      )}
+
+      {doneTasks.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-2 font-display text-xl font-semibold tracking-wide">Recently approved tasks</h2>
+          <Panel><ul className="divide-y divide-line">{doneTasks.map((t) => <TaskRow key={t.id} task={t} showSubject />)}</ul></Panel>
+        </section>
       )}
 
       {recent.length > 0 && (

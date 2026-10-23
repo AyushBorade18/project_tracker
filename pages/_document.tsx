@@ -1,10 +1,11 @@
 import { Html, Head, Main, NextScript } from "next/document";
 
-// Applies the saved theme before first paint so there is no light/dark flash.
+// Applies the theme before first paint so there is no light/dark flash. Light is the default.
 const themeScript = `
 try {
-  var t = localStorage.getItem('projecttrack-theme');
-  if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  var p = localStorage.getItem('projecttrack-theme-pref');
+  if (p !== 'light' && p !== 'dark' && p !== 'system') p = 'light';
+  var t = p === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : p;
   document.documentElement.setAttribute('data-theme', t);
 } catch (e) { document.documentElement.setAttribute('data-theme', 'light'); }
 `;
