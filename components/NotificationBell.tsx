@@ -13,7 +13,7 @@ function iconFor(kind: string) {
 }
 
 /** Bell with an unread count. New items also pop up as a toast the moment they arrive. */
-export function NotificationBell({ variant }: { variant: "rail" | "bar" }) {
+export function NotificationBell({ variant }: { variant: "float" | "bar" }) {
   const { notifications, unreadCount, markRead, markAllRead, alertsPermission, enableAlerts, setView, openTask, isAdmin } = useApp();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -43,7 +43,7 @@ export function NotificationBell({ variant }: { variant: "rail" | "bar" }) {
     }
   };
 
-  const rail = variant === "rail";
+  const float = variant === "float";
   return (
     <div ref={box} className="relative">
       <button
@@ -51,7 +51,12 @@ export function NotificationBell({ variant }: { variant: "rail" | "bar" }) {
         onClick={() => setOpen((o) => !o)}
         aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
         aria-expanded={open}
-        className="relative rounded-md p-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+        className={cx(
+          "relative transition",
+          float
+            ? "rounded-full border border-line bg-surface p-2.5 text-ink shadow-lift hover:bg-surface2"
+            : "rounded-md p-2 text-white/80 hover:bg-white/10 hover:text-white"
+        )}
       >
         {unreadCount > 0 ? <BellRing className="h-5 w-5" /> : <Bell className="h-5 w-5" />}
         {unreadCount > 0 && (
@@ -64,10 +69,10 @@ export function NotificationBell({ variant }: { variant: "rail" | "bar" }) {
           role="dialog"
           aria-label="Notifications"
           className={cx(
-            "z-50 flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-line bg-surface text-ink shadow-lift",
-            rail ? "absolute left-0 top-full mt-2 w-[19rem]" : "fixed inset-x-3 mt-2"
+            "z-50 flex max-h-[75vh] flex-col overflow-hidden rounded-lg border border-line bg-surface text-ink shadow-lift",
+            float ? "absolute right-0 top-full mt-2 w-[24rem] max-w-[calc(100vw-2rem)]" : "fixed inset-x-3 mt-2"
           )}
-          style={rail ? undefined : { top: "calc(env(safe-area-inset-top) + 3.4rem)" }}
+          style={float ? undefined : { top: "calc(env(safe-area-inset-top) + 3.4rem)" }}
         >
           <div className="flex items-center justify-between border-b border-line px-4 py-3">
             <h2 className="font-display text-xl font-semibold tracking-wide">Notifications</h2>

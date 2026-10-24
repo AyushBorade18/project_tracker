@@ -106,12 +106,11 @@ export function Shell() {
   return (
     <div className="min-h-screen lg:flex">
       {/* Desktop rail */}
-      <aside className="hidden bg-rail text-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-60 lg:shrink-0 lg:flex-col">
+      <aside className="z-30 hidden bg-rail text-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:w-60 lg:shrink-0 lg:flex-col">
         <div className="px-5 pt-6">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-white font-display text-base font-bold tracking-wide text-rail">PT</div>
             <span className="flex-1 font-display text-xl font-semibold tracking-wide">ProjectTrack</span>
-            <NotificationBell variant="rail" />
           </div>
           <div className="mt-5"><WorkspaceMenu variant="rail" /></div>
         </div>
@@ -167,7 +166,9 @@ export function Shell() {
         </div>
       </header>
 
-      <main className="relative z-[1] min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-8 lg:pb-8 lg:pt-8">
+      <div className="fixed right-6 top-4 z-40 hidden lg:block"><NotificationBell variant="float" /></div>
+
+      <main className="relative z-[1] min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-8 lg:pb-8 lg:pt-16">
         <div key={current} className="page-in mx-auto max-w-6xl">
           {readOnly && (
             <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-info/40 bg-info/10 px-4 py-2.5 text-sm">
