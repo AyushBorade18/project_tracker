@@ -59,6 +59,7 @@ export interface Deliverable {
   assignee_id: string | null;
   status: Status;
   work_made: string;
+  started_at: string | null;
   live_url: string;
   repo_url: string;
   proof_url: string;
@@ -73,6 +74,7 @@ export interface Deliverable {
 
 export interface Attachment {
   id: string;
+  update_id: string | null;
   group_id: string;
   semester_id: string;
   deliverable_id: string;
@@ -102,6 +104,29 @@ export interface Task {
   created_at: string;
   submitted_at: string | null;
   done_at: string | null;
+}
+
+export type ProgressMood = "on_track" | "almost_done" | "need_help" | "blocked";
+
+export const MOOD_LABEL: Record<ProgressMood, string> = {
+  on_track: "On track",
+  almost_done: "Almost done",
+  need_help: "Need help",
+  blocked: "Blocked",
+};
+
+export interface ProgressUpdate {
+  id: string;
+  group_id: string;
+  semester_id: string;
+  deliverable_id: string;
+  author_id: string | null;
+  mood: ProgressMood;
+  percent: number | null;
+  body: string;
+  github_url: string;
+  link_url: string;
+  created_at: string;
 }
 
 export interface AppNotification {

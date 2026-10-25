@@ -1,12 +1,16 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useApp } from "../../lib/store";
 import { daysUntil, deadlineLabel, effectiveDue, fmtDate, isOverdue } from "../../lib/calc";
 import { Deliverable } from "../../lib/types";
 import { Chip, EmptyState, PageTitle, Panel, StatusBadge, SubjectTag } from "../ui";
 import { TaskRow } from "../TaskList";
+import { UpdateDialog } from "../ProgressUpdates";
+import { Play } from "lucide-react";
+import { Button } from "../ui";
 
 export function MyWork() {
-  const { deliverables, subjects, profile, openTask, subjectIndex, tasks } = useApp();
+  const { deliverables, subjects, profile, openTask, subjectIndex, tasks, patchDeliverable, readOnly } = useApp();
+  const [posting, setPosting] = useState(false);
   const myTasks = useMemo(
     () => tasks.filter((t) => t.assignee_id === profile?.id).sort((a, b) => Number(a.status === "done") - Number(b.status === "done") || (a.due_date || "9999").localeCompare(b.due_date || "9999")),
     [tasks, profile]
@@ -35,7 +39,12 @@ export function MyWork() {
 
   return (
     <div>
-      <PageTitle title="My work" sub={mine.length ? `${done} of ${mine.length} of your deliverables are confirmed.` : undefined} />
+      <PageTitle
+        title="My work"
+        sub={mine.length ? `${done} of ${mine.length} of your deliverables are confirmed.` : undefined}
+        action={mine.some((d) => d.status !== "approved") && !readOnly ? <Button variant="primary" onClick={() => setPosting(true)}>Post a progress update</Button> : undefined}
+      />
+      {posting && <UpdateDialog onClose={() => setPosting(false)} />}
       {myTasks.length > 0 && (
         <section className="mb-6">
           <h2 className="mb-2 font-display text-xl font-semibold tracking-wide">Tasks from your leader <span className="text-muted">({myTasks.filter((t) => t.status === "open").length} open)</span></h2>
@@ -55,7 +64,8 @@ export function MyWork() {
                   const due = effectiveDue(d, s);
                   const dl = deadlineLabel(d.status === "approved" ? null : daysUntil(due));
                   return (
-                    <button key={d.id} type="button" onClick={() => openTask(d.id)} className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left hover:bg-surface2/70">
+                    <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-surface2/70">
+                    <button type="button" onClick={() => openTask(d.id)} className="flex min-w-0 flex-1 flex-wrap items-center gap-3 text-left">
                       {s && <SubjectTag code={s.code} index={subjectIndex(s.id)} />}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{d.title}</span>
@@ -65,6 +75,11 @@ export function MyWork() {
                       {d.status !== "approved" && due && <Chip tone={dl.tone}>{fmtDate(due)}: {dl.text}</Chip>}
                       <StatusBadge status={d.status} />
                     </button>
+                    {d.status === "todo" && !readOnly && !(dl.tone === "bad" && due && daysUntil(due) !== null && (daysUntil(due) as number) < 0) && (
+                      <Button size="sm" variant="ok" onClick={() => patchDeliverable(d.id, { status: "in_progress" }, "Started. Your leader can see when you began.")}><Play className="h-3.5 w-3.5" /> Start</Button>
+                    )}
+                    {d.status !== "approved" && due && (daysUntil(due) as number) < 0 && <p className="basis-full text-xs text-bad">Deadline is over. Open it to ask your leader for more time.</p>}
+                    </div>
                   );
                 })}
               </Panel>

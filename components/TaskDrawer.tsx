@@ -1,22 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, ExternalLink, Github, Globe, Paperclip, Trash2, Undo2, Upload } from "lucide-react";
+import { CalendarClock, Check, Download, ExternalLink, Github, Globe, Paperclip, Play, Trash2, Undo2, Upload } from "lucide-react";
 import { useApp } from "../lib/store";
-import { daysUntil, deadlineLabel, effectiveDue, fmtDate, fmtDateTime, formatBytes } from "../lib/calc";
+import { DEADLINE_MESSAGE, daysUntil, deadlineLabel, effectiveDue, extendDate, fmtDate, fmtDateTime, formatBytes, isOverdue } from "../lib/calc";
 import { Status, STATUS_LABEL, isHttpUrl, submissionKind } from "../lib/types";
 import { Avatar, Button, Chip, CommitInput, Drawer, Field, StatusBadge, SubjectTag, cx, inputCls } from "./ui";
 import { TaskList } from "./TaskList";
+import { UpdateComposer, UpdateList } from "./ProgressUpdates";
 
 const STEPS: Status[] = ["todo", "in_progress", "pending", "approved"];
 
 export function TaskDrawer() {
   const {
     openTaskId, openTask, deliverables, subjects, attachments, activity, members, profile, isAdmin, readOnly, nameOf, memberIndex, subjectIndex,
-    patchDeliverable, deleteDeliverable, uploadAttachment, deleteAttachment, openAttachment, askConfirm, notify, requestWeightChange,
+    patchDeliverable, deleteDeliverable, uploadAttachment, deleteAttachment, openAttachment, askConfirm, notify, requestWeightChange, requestMoreTime, progressUpdates,
   } = useApp();
 
   const d = deliverables.find((x) => x.id === openTaskId) || null;
   const subject = d ? subjects.find((s) => s.id === d.subject_id) : undefined;
-  const files = useMemo(() => attachments.filter((a) => a.deliverable_id === d?.id), [attachments, d?.id]);
+  const files = useMemo(() => attachments.filter((a) => a.deliverable_id === d?.id && !a.update_id), [attachments, d?.id]);
   const history = useMemo(() => activity.filter((a) => a.deliverable_id === d?.id).slice(0, 8), [activity, d?.id]);
 
   const [work, setWork] = useState("");
@@ -28,6 +29,9 @@ export function TaskDrawer() {
   const [reason, setReason] = useState("");
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [moreNote, setMoreNote] = useState("");
+  const [requested, setRequested] = useState(false);
+  const [posting, setPosting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => {
@@ -42,6 +46,9 @@ export function TaskDrawer() {
     load();
     setRejecting(false);
     setReason("");
+    setRequested(false);
+    setMoreNote("");
+    setPosting(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [d?.id]);
 
@@ -56,7 +63,11 @@ export function TaskDrawer() {
   const kind = submissionKind(d.type);
   const isOwner = d.assignee_id === profile.id;
   // Members edit their own unapproved work; the leader can edit anything in the current semester. Archived semesters are read-only.
-  const canWork = !readOnly && (isAdmin || (isOwner && d.status !== "approved"));
+  const overdue = isOverdue(d, subject);
+  const lockedForMember = overdue && !isAdmin;
+  const canWork = !readOnly && (isAdmin || (isOwner && d.status !== "approved" && !overdue));
+  const canPostUpdate = !readOnly && isOwner && d.status !== "approved" && d.status !== "pending" && !overdue;
+  const updateCount = progressUpdates.filter((u) => u.deliverable_id === d.id).length;
   const editable = canWork && d.status !== "pending";
   const due = effectiveDue(d, subject);
   const dl = deadlineLabel(d.status === "approved" ? null : daysUntil(due));
@@ -177,6 +188,40 @@ export function TaskDrawer() {
           ))}
         </ol>
 
+        {/* Start working, and the record of when it began */}
+        {d.status === "todo" && isOwner && !readOnly && !overdue && (
+          <div className="mt-5 flex flex-wrap items-center gap-3 rounded-lg border border-ok/30 bg-ok/10 px-4 py-3">
+            <p className="min-w-0 flex-1 text-sm">Ready to begin? Press start so your leader can see when you began.</p>
+            <Button variant="ok" onClick={() => patchDeliverable(d.id, { status: "in_progress" }, "Started. Your leader can see when you began.")}><Play className="h-4 w-4" /> Start working</Button>
+          </div>
+        )}
+        {d.started_at && (
+          <p className="mt-4 inline-flex items-center gap-1.5 text-xs text-muted"><Play className="h-3.5 w-3.5 text-ok" /> Started {fmtDateTime(d.started_at)}{d.assignee_id ? ` by ${nameOf(d.assignee_id)}` : ""}</p>
+        )}
+
+        {lockedForMember && !readOnly && (
+          <div role="alert" className="mt-5 rounded-lg border border-bad/30 bg-bad/10 px-4 py-3 text-sm">
+            <p className="font-semibold text-bad">The deadline is over</p>
+            <p className="mt-0.5">{isOwner ? DEADLINE_MESSAGE : "This work is past its deadline, so it is closed until the group leader extends it."}</p>
+            {isOwner && (
+              requested ? (
+                <p className="mt-2 text-ok">Request sent. You will get a notification when your leader answers.</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <textarea rows={2} value={moreNote} onChange={(e) => setMoreNote(e.target.value)} placeholder="Why do you need more time, and how much? (optional)" aria-label="Reason for more time" className={inputCls} />
+                  <Button size="sm" onClick={async () => { if (await requestMoreTime({ deliverable_id: d.id }, moreNote)) setRequested(true); }}><CalendarClock className="h-3.5 w-3.5" /> Ask for more time</Button>
+                </div>
+              )
+            )}
+          </div>
+        )}
+        {isAdmin && overdue && (
+          <div role="alert" className="mt-5 rounded-lg border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+            <p className="font-semibold text-warn">Past its deadline</p>
+            <p className="mt-0.5">{nameOf(d.assignee_id)} cannot upload or submit until you give more time. Use Extend next to the due date.</p>
+          </div>
+        )}
+
         {d.feedback && d.status === "in_progress" && (
           <div role="alert" className="mt-5 rounded-md border border-bad/30 bg-bad/10 px-3.5 py-3 text-sm">
             <p className="font-semibold text-bad">{d.feedback.startsWith("Approval reverted") ? "Reassigned to you" : "Changes requested"}</p>
@@ -215,7 +260,19 @@ export function TaskDrawer() {
             <dt className="text-xs text-muted">Due</dt>
             <dd className="mt-1">
               {isAdmin ? (
-                <input type="date" className={inputCls} value={d.due_date || ""} onChange={(e) => patchDeliverable(d.id, { due_date: e.target.value || null })} />
+                <>
+                  <input type="date" className={inputCls} value={d.due_date || ""} onChange={(e) => patchDeliverable(d.id, { due_date: e.target.value || null })} />
+                  {d.status !== "approved" && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <span className="text-[11px] text-muted">Extend:</span>
+                      {[1, 3, 7].map((n) => (
+                        <button key={n} type="button" onClick={() => patchDeliverable(d.id, { due_date: extendDate(due, n) }, `Deadline moved to ${fmtDate(extendDate(due, n))}`)} className="rounded border border-line bg-surface2 px-1.5 py-0.5 text-[11px] font-medium hover:border-faint">
+                          +{n === 7 ? "1 week" : `${n} day${n > 1 ? "s" : ""}`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <span>{due ? fmtDate(due) : "No date set"}</span>
               )}
@@ -303,6 +360,20 @@ export function TaskDrawer() {
               className={inputCls}
             />
           </Field>
+        </section>
+
+        <section className="mt-6 border-t border-line pt-5">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-display text-xl font-semibold tracking-wide">Progress updates {updateCount > 0 && <span className="text-muted">({updateCount})</span>}</h3>
+            {canPostUpdate && !posting && <Button size="sm" onClick={() => setPosting(true)}>Post an update</Button>}
+          </div>
+          <p className="mb-3 mt-0.5 text-xs text-muted">{isOwner ? "Tell your leader how it is going while you work. Add details, a GitHub link or files if you like." : "How the work is going, as reported by the assignee."}</p>
+          {posting && canPostUpdate && (
+            <div className="mb-4 rounded-lg border border-line bg-surface2 p-4">
+              <UpdateComposer deliverableId={d.id} onDone={() => setPosting(false)} onCancel={() => setPosting(false)} />
+            </div>
+          )}
+          <UpdateList deliverableId={d.id} limit={6} />
         </section>
 
         <section className="mt-6 border-t border-line pt-5">

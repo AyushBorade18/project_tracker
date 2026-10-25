@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Check, CheckCircle2, ChevronDown, Circle, Clock, Plus, Trash2, Undo2 } from "lucide-react";
 import { useApp } from "../lib/store";
-import { daysUntil, deadlineLabel, fmtDate } from "../lib/calc";
+import { DEADLINE_MESSAGE, daysUntil, deadlineLabel, extendDate, fmtDate } from "../lib/calc";
 import { Task } from "../lib/types";
 import { Avatar, Button, Chip, cx, inputCls } from "./ui";
 
@@ -20,17 +20,21 @@ export function taskLabel(t: Task): { text: string; tone: "info" | "warn" | "ok"
  *  leader: approve it, send it back with a reason, or revert an approval (it returns to the member as reassigned)
  */
 export function TaskRow({ task, showSubject = false, defaultOpen = false }: { task: Task; showSubject?: boolean; defaultOpen?: boolean }) {
-  const { profile, isAdmin, readOnly, patchTask, deleteTask, askConfirm, notify, nameOf, memberIndex, subjects } = useApp();
+  const { profile, isAdmin, readOnly, patchTask, deleteTask, askConfirm, notify, nameOf, memberIndex, subjects, requestMoreTime } = useApp();
   const [open, setOpen] = useState(defaultOpen);
   const [note, setNote] = useState(task.note || "");
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
+  const [moreNote, setMoreNote] = useState("");
+  const [requested, setRequested] = useState(false);
 
   const mine = task.assignee_id === profile?.id;
   const subject = subjects.find((s) => s.id === task.subject_id);
   const label = taskLabel(task);
   const dl = deadlineLabel(task.status === "done" ? null : daysUntil(task.due_date));
-  const canWork = !readOnly && (isAdmin || mine) && task.status !== "done";
+  const overdue = task.status !== "done" && !!task.due_date && (daysUntil(task.due_date) ?? 0) < 0;
+  const locked = overdue && !isAdmin;
+  const canWork = !readOnly && (isAdmin || mine) && task.status !== "done" && !locked;
   const Icon = task.status === "done" ? CheckCircle2 : task.status === "review" ? Clock : Circle;
   const iconTone = task.status === "done" ? "text-ok" : task.status === "review" ? "text-warn" : label.tone === "bad" ? "text-bad" : "text-muted";
 
@@ -104,6 +108,40 @@ export function TaskRow({ task, showSubject = false, defaultOpen = false }: { ta
       {open && (
         <div className="space-y-3 px-4 pb-4 pl-11 text-sm">
           {task.details && <p className="whitespace-pre-wrap text-muted">{task.details}</p>}
+
+          {locked && mine && !readOnly && (
+            <div role="alert" className="rounded-md border border-bad/30 bg-bad/10 px-3 py-2.5">
+              <p className="text-xs font-semibold text-bad">The deadline is over</p>
+              <p className="mt-0.5">{DEADLINE_MESSAGE}</p>
+              {requested ? (
+                <p className="mt-2 text-ok">Request sent. You will be notified when your leader answers.</p>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  <textarea rows={2} value={moreNote} onChange={(e) => setMoreNote(e.target.value)} placeholder="Why do you need more time, and how much? (optional)" aria-label="Reason for more time" className={inputCls} />
+                  <Button size="sm" onClick={async () => { if (await requestMoreTime({ task_id: task.id }, moreNote)) setRequested(true); }}>Ask for more time</Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isAdmin && !readOnly && task.status !== "done" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted">Deadline</span>
+              <input
+                type="date"
+                value={task.due_date || ""}
+                onChange={(e) => patchTask(task.id, { due_date: e.target.value || null }, "Deadline updated")}
+                aria-label="Task deadline"
+                className={cx(inputCls, "w-auto py-1 text-xs")}
+              />
+              {[1, 3, 7].map((n) => (
+                <button key={n} type="button" onClick={() => patchTask(task.id, { due_date: extendDate(task.due_date, n) }, `Deadline moved to ${fmtDate(extendDate(task.due_date, n))}`)} className="rounded border border-line bg-surface2 px-1.5 py-0.5 text-[11px] font-medium hover:border-faint">
+                  +{n === 7 ? "1 week" : `${n} day${n > 1 ? "s" : ""}`}
+                </button>
+              ))}
+              {overdue && <span className="text-xs text-warn">Past the deadline: {nameOf(task.assignee_id)} is locked out until you extend it.</span>}
+            </div>
+          )}
 
           {task.feedback && task.status === "open" && (
             <div role="alert" className="rounded-md border border-bad/30 bg-bad/10 px-3 py-2">

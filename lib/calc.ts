@@ -342,3 +342,16 @@ export function distributeWeights(
   const original = new Map(others.map((o) => [o.id, o.weight]));
   return pool.filter((p) => p.weight !== original.get(p.id)).map((p) => ({ id: p.id, weight: p.weight }));
 }
+
+/** The deadline has passed and the work is not approved: members are locked out until the leader extends it. */
+export function isLockedByDeadline(d: Deliverable, s?: Subject): boolean {
+  return isOverdue(d, s);
+}
+
+export const DEADLINE_MESSAGE = "The deadline is over. Uploads and submissions are closed. Ask your group leader for more time.";
+
+/** New date after adding days to the later of today and the current date (so extending an old deadline starts from today). */
+export function extendDate(current: string | null, days: number): string {
+  const base = current && parseDay(current).getTime() > todayStart().getTime() ? parseDay(current) : todayStart();
+  return toDayStr(new Date(base.getFullYear(), base.getMonth(), base.getDate() + days));
+}

@@ -127,7 +127,8 @@ button, a, select, summary, label { touch-action: manipulation; }
   from { opacity: 0; transform: translate3d(0, 14px, 0); }
   to   { opacity: 1; transform: none; }
 }
-.page-in { animation: page-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* backwards (not both): once the animation ends nothing stays applied, so fixed-position popups inside a page are not trapped by it */
+.page-in { animation: page-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
 
 .tilt {
   transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));

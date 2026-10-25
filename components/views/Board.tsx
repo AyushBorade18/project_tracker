@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { useApp } from "../../lib/store";
-import { daysUntil, deadlineLabel, effectiveDue, fmtDate } from "../../lib/calc";
+import { daysUntil, deadlineLabel, effectiveDue, fmtDate, relTime } from "../../lib/calc";
+import { MoodChip } from "../ProgressUpdates";
 import { Deliverable, Status, STATUS_LABEL } from "../../lib/types";
 import { STATUS_COLOR } from "../../lib/theme";
 import { Avatar, Chip, EmptyState, PageTitle, SubjectTag, cx, inputCls } from "../ui";
@@ -9,7 +10,8 @@ import { Avatar, Chip, EmptyState, PageTitle, SubjectTag, cx, inputCls } from ".
 const COLUMNS: Status[] = ["todo", "in_progress", "pending", "approved"];
 
 export function TaskCard({ d }: { d: Deliverable }) {
-  const { subjects, openTask, nameOf, memberIndex, subjectIndex, attachments } = useApp();
+  const { subjects, openTask, nameOf, memberIndex, subjectIndex, attachments, progressUpdates } = useApp();
+  const latest = progressUpdates.find((u) => u.deliverable_id === d.id);
   const subject = subjects.find((s) => s.id === d.subject_id);
   const due = effectiveDue(d, subject);
   const dl = deadlineLabel(d.status === "approved" ? null : daysUntil(due));
@@ -25,7 +27,10 @@ export function TaskCard({ d }: { d: Deliverable }) {
         <span className="font-display text-lg font-semibold text-muted">{d.weight}%</span>
       </div>
       <p className="mt-2 text-sm font-medium leading-snug">{d.title}</p>
-      {d.feedback && d.status === "in_progress" && <p className="mt-1.5 text-xs font-medium text-bad">Changes requested</p>}
+      {d.feedback && d.status === "in_progress" && <p className="mt-1.5 text-xs font-medium text-bad">{d.feedback.startsWith("Approval reverted") ? "Reassigned" : "Changes requested"}</p>}
+      {latest && d.status !== "approved" && (
+        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted"><MoodChip mood={latest.mood} />{latest.percent !== null && <span>{latest.percent}%</span>}<span>{relTime(latest.created_at)}</span></p>
+      )}
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted">
           <Avatar name={nameOf(d.assignee_id)} index={memberIndex(d.assignee_id)} size={20} />

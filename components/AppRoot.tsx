@@ -3,6 +3,7 @@ import { AppProvider, useApp } from "../lib/store";
 import { supabaseConfigured } from "../lib/supabase";
 import { AuthScreen, OnboardingScreen, PendingScreen, SetupScreen } from "./AuthScreen";
 import { Shell } from "./Shell";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 function Splash({ text = "Loading ProjectTrack…" }: { text?: string }) {
   return (
@@ -25,8 +26,10 @@ function Gate() {
 export default function AppRoot() {
   if (!supabaseConfigured) return <SetupScreen />;
   return (
-    <AppProvider>
-      <Gate />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <Gate />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

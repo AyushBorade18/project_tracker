@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Bell, BellRing, CheckCheck, ClipboardCheck, ListTodo, Undo2 } from "lucide-react";
+import { Bell, BellRing, CalendarClock, CheckCheck, ClipboardCheck, ListTodo, MessageSquareText, Play, Undo2 } from "lucide-react";
 import { useApp } from "../lib/store";
 import { relTime } from "../lib/calc";
 import { AppNotification } from "../lib/types";
@@ -8,7 +8,10 @@ import { cx } from "./ui";
 function iconFor(kind: string) {
   if (kind.endsWith("approved")) return <ClipboardCheck className="h-4 w-4 text-ok" />;
   if (kind.endsWith("reverted") || kind.endsWith("changes")) return <Undo2 className="h-4 w-4 text-bad" />;
-  if (kind.endsWith("submitted")) return <BellRing className="h-4 w-4 text-warn" />;
+  if (kind.endsWith("submitted") || kind === "extension_requested") return <BellRing className="h-4 w-4 text-warn" />;
+  if (kind === "deliverable_update") return <MessageSquareText className="h-4 w-4 text-info" />;
+  if (kind === "deliverable_started") return <Play className="h-4 w-4 text-ok" />;
+  if (kind === "deadline_changed") return <CalendarClock className="h-4 w-4 text-info" />;
   return <ListTodo className="h-4 w-4 text-info" />;
 }
 
@@ -16,6 +19,7 @@ function iconFor(kind: string) {
 export function NotificationBell({ variant }: { variant: "float" | "bar" }) {
   const { notifications, unreadCount, markRead, markAllRead, alertsPermission, enableAlerts, setView, openTask, isAdmin } = useApp();
   const [open, setOpen] = useState(false);
+  const unread = notifications.filter((n) => !n.read_at);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,7 +40,7 @@ export function NotificationBell({ variant }: { variant: "float" | "bar" }) {
     markRead(n.id);
     setOpen(false);
     if (n.task_id) {
-      setView(isAdmin && n.kind === "task_submitted" ? "approvals" : "mine");
+      setView(isAdmin && n.kind === "task_submitted" ? "approvals" : isAdmin && n.kind === "extension_requested" ? "plan" : "mine");
     } else if (n.deliverable_id) {
       setView(isAdmin && n.kind === "deliverable_submitted" ? "approvals" : "board");
       setTimeout(() => openTask(n.deliverable_id), 50);
@@ -81,11 +85,11 @@ export function NotificationBell({ variant }: { variant: "float" | "bar" }) {
             )}
           </div>
           <div className="overflow-y-auto">
-            {notifications.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-muted">You are all caught up. New tasks and reviews show up here.</p>
+            {unread.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-muted">You are all caught up. Anything new shows up here, and disappears once you have seen it.</p>
             ) : (
               <ul className="divide-y divide-line">
-                {notifications.map((n) => (
+                {unread.map((n) => (
                   <li key={n.id}>
                     <button type="button" onClick={() => go(n)} className={cx("flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-surface2", !n.read_at && "bg-info/5")}>
                       <span className="mt-0.5 shrink-0">{iconFor(n.kind)}</span>

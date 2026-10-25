@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { BUCKET, getSupabase } from "./supabase";
-import { ActivityItem, AppNotification, Attachment, Deliverable, Group, Membership, Profile, Semester, Status, Subject, Task, ViewId } from "./types";
+import { ActivityItem, AppNotification, Attachment, ProgressMood, ProgressUpdate, Deliverable, Group, Membership, Profile, Semester, Status, Subject, Task, ViewId } from "./types";
 import { LegacyBackup, dataUrlToFile, mapProof, mapStatus, matchMember, normalizeType } from "./legacy";
 
 type Tone = "ok" | "bad" | "info";
@@ -64,6 +64,7 @@ interface AppContextValue {
   attachments: Attachment[];
   activity: ActivityItem[];
   tasks: Task[];
+  progressUpdates: ProgressUpdate[];
   nameOf: (id: string | null | undefined) => string;
   memberIndex: (id: string | null | undefined) => number;
   subjectIndex: (id: string | null | undefined) => number;
@@ -117,6 +118,9 @@ interface AppContextValue {
   addTask: (t: { subject_id: string; title: string; assignee_id?: string | null; due_date?: string | null; deliverable_id?: string | null; details?: string }) => Promise<boolean>;
   patchTask: (id: string, patch: Partial<Pick<Task, "title" | "details" | "assignee_id" | "due_date" | "status" | "deliverable_id" | "note" | "feedback">>, okMsg?: string) => Promise<boolean>;
   deleteTask: (id: string) => Promise<boolean>;
+  addUpdate: (u: { deliverable_id: string; mood: ProgressMood; percent: number | null; body: string; github_url: string; link_url: string }, files: File[]) => Promise<boolean>;
+  deleteUpdate: (id: string) => Promise<boolean>;
+  requestMoreTime: (target: { deliverable_id?: string; task_id?: string }, note: string) => Promise<boolean>;
 }
 
 const Ctx = createContext<AppContextValue | null>(null);
@@ -166,6 +170,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [progressUpdates, setProgressUpdates] = useState<ProgressUpdate[]>([]);
 
   const [view, setViewState] = useState<ViewId>("scoreboard");
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
@@ -267,6 +272,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setAttachments([]);
         setActivity([]);
         setTasks([]);
+        setProgressUpdates([]);
         setShowOnboarding(false);
       }
     });
@@ -367,6 +373,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setAttachments([]);
     setActivity([]);
     setTasks([]);
+    setProgressUpdates([]);
     setOpenTaskId(null);
     setGroupId(id);
     setShowOnboarding(false);
@@ -423,6 +430,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const { data, error } = await sb.from("attachments").select("*").eq("group_id", g).eq("semester_id", s).order("created_at");
         if (!error && data) setAttachments(data as Attachment[]);
       },
+      updates: async () => {
+        const g = gRef.current, s = sRef.current;
+        if (!g || !s) return;
+        const { data, error } = await sb.from("progress_updates").select("*").eq("group_id", g).eq("semester_id", s).order("created_at", { ascending: false }).limit(500);
+        if (!error && data) setProgressUpdates(data as ProgressUpdate[]);
+      },
       tasks: async () => {
         const g = gRef.current, s = sRef.current;
         if (!g || !s) return;
@@ -442,7 +455,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshAll = useCallback(async () => {
     await loadMe();
     await Promise.all([fetchers.members(), fetchers.semesters()]);
-    await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity(), fetchers.tasks()]);
+    await Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity(), fetchers.tasks(), fetchers.updates()]);
   }, [fetchers, loadMe]);
 
   // Load the group when it becomes active
@@ -464,7 +477,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!active || !groupId || !semesterId) return;
     let cancelled = false;
     setLoading(true);
-    Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity(), fetchers.tasks()]).finally(() => !cancelled && setLoading(false));
+    Promise.all([fetchers.subjects(), fetchers.deliverables(), fetchers.attachments(), fetchers.activity(), fetchers.tasks(), fetchers.updates()]).finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, [active, groupId, semesterId, fetchers]);
 
@@ -483,6 +496,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     on("deliverables", () => { fetchers.deliverables(); fetchers.activity(); });
     on("subjects", () => fetchers.subjects());
     on("attachments", () => fetchers.attachments());
+    on("progress_updates", () => { fetchers.updates(); fetchers.activity(); });
     on("tasks", () => { fetchers.tasks(); fetchers.activity(); });
     on("activity", () => fetchers.activity());
     on("semesters", () => fetchers.semesters());
@@ -751,7 +765,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const uploadRaw = useCallback(
-    async (deliverableId: string, file: File, quiet = false): Promise<boolean> => {
+    async (deliverableId: string, file: File, quiet = false, updateId?: string): Promise<boolean> => {
       if (file.size > MAX_FILE) {
         notify(`${file.name} is larger than 25 MB. Compress it and try again.`, "bad");
         return false;
@@ -765,6 +779,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         const ins = await sb.from("attachments").insert({
           deliverable_id: deliverableId,
+          update_id: updateId ?? null,
           storage_path: path,
           file_name: file.name,
           size_bytes: file.size,
@@ -850,6 +865,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return ok;
     },
     [run, sb, fetchers]
+  );
+
+  const addUpdate: AppContextValue["addUpdate"] = useCallback(
+    async (u, files) => {
+      try {
+        const { data, error } = await sb
+          .from("progress_updates")
+          .insert({ deliverable_id: u.deliverable_id, mood: u.mood, percent: u.percent, body: u.body.trim(), github_url: u.github_url.trim(), link_url: u.link_url.trim() })
+          .select("id")
+          .single();
+        if (error || !data) {
+          notify(error?.message || "Could not post the update.", "bad");
+          return false;
+        }
+        const id = (data as { id: string }).id;
+        let failed = 0;
+        for (const f of files) if (!(await uploadRaw(u.deliverable_id, f, true, id))) failed++;
+        await Promise.all([fetchers.updates(), fetchers.attachments(), fetchers.deliverables(), fetchers.activity()]);
+        notify(failed ? `Update posted, but ${failed} file${failed > 1 ? "s" : ""} did not upload.` : "Update posted. Your leader has been notified.", failed ? "bad" : "ok");
+        return true;
+      } catch (e) {
+        notify(e instanceof Error ? e.message : "Could not post the update.", "bad");
+        return false;
+      }
+    },
+    [sb, notify, uploadRaw, fetchers]
+  );
+
+  const deleteUpdate: AppContextValue["deleteUpdate"] = useCallback(
+    async (id) => {
+      const paths = attachments.filter((a) => a.update_id === id).map((a) => a.storage_path);
+      const ok = await run(() => sb.from("progress_updates").delete().eq("id", id), "Update removed");
+      if (ok) {
+        if (paths.length) await sb.storage.from(BUCKET).remove(paths);
+        await Promise.all([fetchers.updates(), fetchers.attachments()]);
+      }
+      return ok;
+    },
+    [run, sb, fetchers, attachments]
+  );
+
+  const requestMoreTime: AppContextValue["requestMoreTime"] = useCallback(
+    async (target, note) =>
+      run(
+        () => sb.rpc("request_more_time", { p_deliverable: target.deliverable_id ?? null, p_task: target.task_id ?? null, p_note: note }),
+        "Request sent. Your leader has been notified."
+      ),
+    [run, sb]
   );
 
   /** Brings the original app's JSON backup into the semester being viewed (leader only). */
@@ -1018,7 +1081,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     me, profile, profileLoaded, isLeader, isAdmin,
     groups, group, switchGroup, showOnboarding, setShowOnboarding,
     semesters, semester, currentSemester, setSemesterId, readOnly,
-    loading, profiles, members, subjects, deliverables, attachments, activity, tasks,
+    loading, profiles, members, subjects, deliverables, attachments, activity, tasks, progressUpdates,
     nameOf, memberIndex, subjectIndex, refreshAll,
     view, setView, openTaskId, openTask: setOpenTaskId, theme, themePref, setThemePref,
     toasts, notify, confirmState, askConfirm, closeConfirm,
@@ -1026,7 +1089,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     updateProfile, changeOwnPassword, saveSubject, addSubject, deleteSubject,
     addDeliverable, patchDeliverable, deleteDeliverable, rebalance, bulkAssign,
     uploadAttachment, deleteAttachment, openAttachment, importLegacy,
-    addTask, patchTask, deleteTask,
+    addTask, patchTask, deleteTask, addUpdate, deleteUpdate, requestMoreTime,
     notifications, unreadCount, markRead, markAllRead, alertsPermission, enableAlerts,
     weightChange, requestWeightChange, closeWeightChange, applyWeights,
   };
